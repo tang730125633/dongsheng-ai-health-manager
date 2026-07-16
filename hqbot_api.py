@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """东晟时代统一后端服务。监听 :8093。密钥读 /opt/zhipu.key(视觉) 和 /opt/dify.key(问答)。
 接口:
-  POST /api/tongue   {"image":"<base64>"} → 舌诊结构化结果
+  POST /api/tongue   {"image":"<base64>"} → 舌诊结构化结果；非舌照自动尝试识别体测报告→解读+产品推荐(tip字段)
   POST /api/chat     {"query":..,"user":..,"conversation_id":..(可选)} → {answer, conversation_id}
   GET  /health
 """
@@ -29,6 +29,44 @@ TONGUE_SYS = """你是"东晟时代"AI舌诊助手。观察舌头照片，抓主
 【规则】胖大+齿痕+白腻厚苔+舌色偏淡→痰湿蕴盛型；淡胖+齿痕+薄白苔+舌色更淡→脾虚湿困型；舌色淡白+胖嫩+齿痕浅→气血两虚型；舌色淡紫或青暗→宫寒气滞型
 【只输出JSON，body_type必须是上面四个之一】{"is_tongue":true,"observation":"一句话舌象","body_type":"xx型"}
 若不是舌头或看不清:{"is_tongue":false}"""
+
+
+
+def _vision(system, image_b64, max_tokens=400):
+    content = [{"type": "text", "text": "分析这张图片，只输出JSON。"},
+               {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + image_b64}}]
+    body = json.dumps({"model": "glm-4v-plus", "messages": [
+        {"role": "system", "content": system}, {"role": "user", "content": content}],
+        "max_tokens": max_tokens}).encode()
+    req = urllib.request.Request(ZHIPU, data=body, headers={
+        "Authorization": "Bearer " + ZHIPU_KEY, "Content-Type": "application/json"})
+    txt = (json.load(urllib.request.urlopen(req, timeout=120))["choices"][0]["message"].get("content") or "").strip()
+    if txt.startswith("```"):
+        txt = txt.split("```")[1].lstrip("json").strip()
+    return json.loads(txt)
+
+
+REPORT_SYS = """你是健康报告识别助手。判断图片是否为体测/体脂/健康检测报告（含体重、体脂率、BMI、内脏脂肪等指标的截图或照片）。
+是报告→提取图中能看清的指标，只输出JSON:{"is_report":true,"metrics":{"体重":"105.2公斤","BMI":"31.76","体脂率":"31.27%"},"trend":"若图中有前后对比，用一句话说明主要变化，无则空字符串"}
+不是报告→{"is_report":false}"""
+
+
+def analyze_report(image_b64, user=""):
+    """非舌照时的第二次识别：体测报告→提指标→交给 Dify 解读+推荐产品。不是报告返回 None。"""
+    try:
+        r = _vision(REPORT_SYS, image_b64, max_tokens=600)
+    except Exception:
+        return None
+    if not r.get("is_report"):
+        return None
+    m = r.get("metrics") or {}
+    q = "用户发来一份体测报告，指标：" + "、".join(f"{k} {v}" for k, v in m.items())
+    if r.get("trend"):
+        q += "。前后变化：" + r["trend"]
+    q += "。请用亲切易懂的语气解读这份报告（重点讲需要注意的指标），并推荐适合的产品和使用建议。"
+    a = chat(q, user or "report-user", "")
+    return {"is_tongue": False, "is_report": True, "metrics": m,
+            "tip": a["answer"] or ("报告已收到，" + TIP)}
 
 
 def analyze_tongue(image_b64):
@@ -85,7 +123,12 @@ class H(http.server.BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(n)) if n else {}
             if self.path == "/api/tongue":
-                self._send({"ok": True, **analyze_tongue(data["image"])})
+                res = analyze_tongue(data["image"])
+                if not res.get("is_tongue"):
+                    rep = analyze_report(data["image"], data.get("user", ""))
+                    if rep:
+                        res = rep
+                self._send({"ok": True, **res})
             elif self.path == "/api/chat":
                 self._send({"ok": True, **chat(data.get("query", ""), data.get("user", ""), data.get("conversation_id", ""))})
             else:

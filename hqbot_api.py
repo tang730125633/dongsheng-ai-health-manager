@@ -69,6 +69,41 @@ def analyze_report(image_b64, user=""):
             "tip": a["answer"] or ("报告已收到，" + TIP)}
 
 
+UNIFIED_SYS = """你是"东晟时代"AI健康助手的图片识别器。判断图片类型并按对应规则输出，只输出JSON。
+【若是舌头照片】观察4点：舌体(正常/胖大)、齿痕(无/有)、舌苔(薄白/白腻厚/少苔)、舌色(淡红/偏淡白/淡紫暗)。
+规则：胖大+齿痕+白腻厚苔+舌色偏淡→痰湿蕴盛型；淡胖+齿痕+薄白苔+舌色更淡→脾虚湿困型；舌色淡白+胖嫩+齿痕浅→气血两虚型；舌色淡紫或青暗→宫寒气滞型。
+输出：{"type":"tongue","observation":"一句话舌象","body_type":"必须是上面四个之一"}
+舌头但看不清：{"type":"tongue_unclear"}
+【若是体测/体脂/健康检测报告】(含体重、体脂率、BMI等指标的截图或照片)提取图中能看清的指标：
+{"type":"report","metrics":{"体重":"105.2公斤","BMI":"31.76","体脂率":"31.27%"},"trend":"若有前后对比，一句话主要变化，无则空字符串"}
+【都不是】{"type":"other"}"""
+
+
+def analyze_image(image_b64, user=""):
+    """一次视觉调用完成分类：舌照→体质查表；报告→Dify解读推荐；其他→引导语。"""
+    r = _vision(UNIFIED_SYS, image_b64, max_tokens=600)
+    t = r.get("type", "other")
+    if t == "tongue":
+        bt = r.get("body_type", "")
+        if bt not in BODY_MAP:
+            return {"is_tongue": True, "observation": r.get("observation", ""), "body_type": bt or "未明确",
+                    "symptoms": [], "products": [], "tip": "舌象不够典型，" + TIP}
+        m = BODY_MAP[bt]
+        return {"is_tongue": True, "observation": r.get("observation", ""), "body_type": bt,
+                "symptoms": m["symptoms"], "products": m["products"], "tip": TIP}
+    if t == "report":
+        m = r.get("metrics") or {}
+        q = "用户发来一份体测报告，指标：" + "、".join(f"{k} {v}" for k, v in m.items())
+        if r.get("trend"):
+            q += "。前后变化：" + r["trend"]
+        q += ("。请解读这份报告（重点讲需要注意的指标），并推荐适合的产品。"
+              "要求：口语化、亲切、200字以内、不用markdown标题和分隔线，不要提到资料、context、知识库等字眼。")
+        a = chat(q, user or "report-user", "")
+        return {"is_tongue": False, "is_report": True, "metrics": m,
+                "tip": a["answer"] or ("报告已收到，" + TIP)}
+    return {"is_tongue": False, "tip": "这张看不清舌头，请对着光、正对镜头再拍一张伸舌照"}
+
+
 def analyze_tongue(image_b64):
     content = [{"type": "text", "text": "分析这张舌头照片，只输出JSON。"},
                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + image_b64}}]
@@ -125,11 +160,7 @@ class H(http.server.BaseHTTPRequestHandler):
             if self.path == "/api/tongue":
                 import time as _t
                 t0 = _t.time()
-                res = analyze_tongue(data["image"])
-                if not res.get("is_tongue"):
-                    rep = analyze_report(data["image"], data.get("user", ""))
-                    if rep:
-                        res = rep
+                res = analyze_image(data["image"], data.get("user", ""))
                 kind = "tongue" if res.get("is_tongue") else ("report" if res.get("is_report") else "other")
                 print(f"[img] kind={kind} {_t.time()-t0:.1f}s", flush=True)
                 self._send({"ok": True, **res})

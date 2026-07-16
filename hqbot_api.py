@@ -74,7 +74,7 @@ UNIFIED_SYS = """你是"东晟时代"AI健康助手的图片识别器。判断�
 规则：胖大+齿痕+白腻厚苔+舌色偏淡→痰湿蕴盛型；淡胖+齿痕+薄白苔+舌色更淡→脾虚湿困型；舌色淡白+胖嫩+齿痕浅→气血两虚型；舌色淡紫或青暗→宫寒气滞型。
 输出：{"type":"tongue","observation":"一句话舌象","body_type":"必须是上面四个之一"}
 舌头但看不清：{"type":"tongue_unclear"}
-【若是体测/体脂/健康检测报告】(含体重、体脂率、BMI等指标的截图或照片)提取图中能看清的指标：
+【若是体测/体脂/健康检测报告】必须清晰含有体重/体脂率/BMI/内脏脂肪等身体成分数字指标才算；海报、广告、聊天截图、文档一律不算。提取图中能看清的指标：
 {"type":"report","metrics":{"体重":"105.2公斤","BMI":"31.76","体脂率":"31.27%"},"trend":"若有前后对比，一句话主要变化，无则空字符串"}
 【都不是】{"type":"other"}"""
 
@@ -93,6 +93,9 @@ def analyze_image(image_b64, user=""):
                 "symptoms": m["symptoms"], "products": m["products"], "tip": TIP}
     if t == "report":
         m = r.get("metrics") or {}
+        BODY_KEYS = ("体重", "BMI", "体脂", "内脏脂肪", "肌肉", "基础代谢", "骨骼肌", "水分", "蛋白")
+        if not any(bk in k for k in m for bk in BODY_KEYS):
+            return {"is_tongue": False, "tip": "这张看不清舌头，请对着光、正对镜头再拍一张伸舌照"}
         q = "用户发来一份体测报告，指标：" + "、".join(f"{k} {v}" for k, v in m.items())
         if r.get("trend"):
             q += "。前后变化：" + r["trend"]

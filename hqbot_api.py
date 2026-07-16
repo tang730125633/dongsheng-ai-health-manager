@@ -123,11 +123,15 @@ class H(http.server.BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(n)) if n else {}
             if self.path == "/api/tongue":
+                import time as _t
+                t0 = _t.time()
                 res = analyze_tongue(data["image"])
                 if not res.get("is_tongue"):
                     rep = analyze_report(data["image"], data.get("user", ""))
                     if rep:
                         res = rep
+                kind = "tongue" if res.get("is_tongue") else ("report" if res.get("is_report") else "other")
+                print(f"[img] kind={kind} {_t.time()-t0:.1f}s", flush=True)
                 self._send({"ok": True, **res})
             elif self.path == "/api/chat":
                 self._send({"ok": True, **chat(data.get("query", ""), data.get("user", ""), data.get("conversation_id", ""))})

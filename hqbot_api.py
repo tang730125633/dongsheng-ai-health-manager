@@ -63,7 +63,7 @@ def analyze_report(image_b64, user=""):
     q = "用户发来一份体测报告，指标：" + "、".join(f"{k} {v}" for k, v in m.items())
     if r.get("trend"):
         q += "。前后变化：" + r["trend"]
-    q += "。请用亲切易懂的语气解读这份报告（重点讲需要注意的指标），并推荐适合的产品和使用建议。"
+    q += "。请用亲切易懂的语气解读这份报告（重点讲需要注意的指标），并推荐适合的产品和使用建议。话术自然亲切，不要提到资料、context、知识库等字眼。"
     a = chat(q, user or "report-user", "")
     return {"is_tongue": False, "is_report": True, "metrics": m,
             "tip": a["answer"] or ("报告已收到，" + TIP)}

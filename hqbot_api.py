@@ -81,7 +81,12 @@ UNIFIED_SYS = """你是"东晟时代"AI健康助手的图片识别器。判断�
 
 def analyze_image(image_b64, user=""):
     """一次视觉调用完成分类：舌照→体质查表；报告→Dify解读推荐；其他→引导语。"""
-    r = _vision(UNIFIED_SYS, image_b64, max_tokens=600)
+    try:
+        r = _vision(UNIFIED_SYS, image_b64, max_tokens=600)
+    except Exception as e:
+        print(f"[retry] vision失败重试一次: {e}", flush=True)
+        import time as _t; _t.sleep(1)
+        r = _vision(UNIFIED_SYS, image_b64, max_tokens=600)
     t = r.get("type", "other")
     if t == "tongue":
         bt = r.get("body_type", "")

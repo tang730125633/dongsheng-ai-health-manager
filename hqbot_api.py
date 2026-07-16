@@ -172,6 +172,9 @@ class H(http.server.BaseHTTPRequestHandler):
             else:
                 self._send({"ok": False, "error": "not found"}, 404)
         except Exception as e:
+            import traceback
+            print(f"[err] {self.path}: {e}", flush=True)
+            traceback.print_exc()
             self._send({"ok": False, "error": str(e)[:200]}, 500)
 
     def log_message(self, *a):

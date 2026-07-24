@@ -11,11 +11,37 @@ os.environ.setdefault("OPENAI_BASE", "https://example.com/openai/v1")
 import hqbot_api as h
 
 assert h.OPENAI == "https://example.com/openai/v1/chat/completions"
-assert h._body_type("脾虚") == "脾虚湿困型"
-assert h._body_type("气血两虚型") == "气血两虚型"
-assert h._body_type("宫寒气滞型") == "寒凝气滞型"
-assert h._body_type("寒凝") == "寒凝气滞型"
-assert h._body_type("未明确") == ""
+assert "不做体质分类" in h.UNIFIED_SYS
+assert not any(body_type in h.UNIFIED_SYS for body_type in h.BODY_MAP)
+assert h._body_type_from_details({
+    "tongue_body": "胖大", "tongue_color": "偏淡", "tooth_marks": "明显",
+    "coating_color": "白", "coating_thickness": "厚", "coating_texture": "腻",
+}) == "痰湿蕴盛型"
+assert h._body_type_from_details({
+    "tongue_body": "淡胖", "tongue_color": "偏淡", "tooth_marks": "有",
+    "coating_color": "白", "coating_thickness": "薄", "coating_texture": "普通",
+}) == "脾虚湿困型"
+assert h._body_type_from_details({
+    "tongue_body": "胖嫩", "tongue_color": "淡白", "tooth_marks": "浅",
+    "coating_color": "白", "coating_thickness": "薄", "coating_texture": "普通",
+    "coating_amount": "适中", "moisture": "正常", "fissures": "无",
+}) == "气血两虚型"
+assert h._body_type_from_details({
+    "tongue_body": "正常", "tongue_color": "淡紫",
+}) == "寒凝气滞型"
+assert h._body_type_from_details({
+    "tongue_body": "正常", "tongue_color": "淡红", "tooth_marks": "不明显",
+    "coating_color": "白", "coating_thickness": "薄", "coating_texture": "普通",
+}) == ""
+assert h._body_type_from_details({
+    "tongue_body": "难以辨认，胖嫩", "tongue_color": "难以辨认，淡白",
+    "tooth_marks": "难辨，浅",
+}) == ""
+assert h._body_type_from_details({"tongue_color": "不淡紫"}) == ""
+assert h._body_type_from_details({
+    "tongue_body": "淡胖", "tongue_color": "偏淡", "tooth_marks": "没有",
+    "coating_color": "白", "coating_thickness": "薄",
+}) == ""
 for profile in h.BODY_MAP.values():
     assert len(h._product_details(profile["products"])) == len(profile["products"])
 assert not any(word in product["benefit"] for product in h.PRODUCT_CATALOG.values()
@@ -47,14 +73,14 @@ assert h._image_url(webp).startswith("data:image/webp;base64,")
 h._vision = lambda *args, **kwargs: {
     "type": "tongue",
     "observation": "舌体偏胖，舌色偏淡，边缘可见齿痕，舌苔白且偏厚",
-    "body_type": "脾虚",
+    "body_type": "故意给错的寒凝气滞型",
     "tongue_details": {
-        "tongue_body": "偏胖",
+        "tongue_body": "淡胖",
         "tongue_color": "偏淡",
         "tooth_marks": "有",
         "coating_color": "白",
-        "coating_thickness": "偏厚",
-        "coating_texture": "略腻",
+        "coating_thickness": "薄",
+        "coating_texture": "普通",
         "coating_amount": "偏多",
         "moisture": "偏润",
         "fissures": "看不清",
@@ -71,7 +97,7 @@ assert tongue["product_details"][0]["benefit"]
 assert tongue["tip"] == tongue["answer"]
 assert_neutral(tongue)
 assert all(text in tongue["answer"] for text in (
-    "初步舌象", "舌象细节", "舌苔厚薄：偏厚", "常见表现，请你核对",
+    "初步舌象", "舌象细节", "舌苔厚薄：薄", "常见表现，请你核对",
     "管理重点", "今天可以先做", "下一步", "这些不是照片能够直接证明的症状",
     "用白话说", "推荐产品", "搭配产品：", "搭配调理方向", "主要成分",
     "本次初步倾向：脾虚湿困型",

@@ -369,6 +369,11 @@ def _image_context_data(result):
                 for item in result.get("product_details", [])[:3] if isinstance(item, dict)]
     if result.get("is_tongue"):
         profile = BODY_MAP.get(result.get("body_type"), {})
+        safe_actions = list(profile.get("advice", [])) or [
+            "保持三餐和作息规律，避免暴饮暴食及长期熬夜",
+            "身体允许时保持轻度步行或拉伸，减少久坐",
+            "记录一至两周睡眠、食欲、排便、精力和冷热感受；出现持续或明显不适时及时就医",
+        ]
         return {
             "image_type": "tongue",
             "observation": _short(result.get("observation"), 300),
@@ -377,8 +382,8 @@ def _image_context_data(result):
                                for key, _ in TONGUE_FIELDS},
             "quality_issues": [_short(value, 80) for value in result.get("quality_issues", [])[:8]],
             "symptoms_to_verify": [_short(value, 80) for value in result.get("symptoms", [])[:10]],
-            "management_focus": _short(profile.get("focus"), 200),
-            "safe_actions": [_short(value, 120) for value in profile.get("advice", [])[:5]],
+            "management_focus": _short(profile.get("focus") or "先完善生活感受和基础健康信息，再决定是否需要进一步评估", 200),
+            "safe_actions": [_short(value, 120) for value in safe_actions[:5]],
             "candidate_products": products,
         }
     if result.get("is_report"):

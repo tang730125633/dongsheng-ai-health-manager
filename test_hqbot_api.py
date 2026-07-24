@@ -464,6 +464,11 @@ product_answer = h.chat_with_image_context("有哪些推荐产品和主要成分
 assert "推荐产品" in product_answer["answer"] and "搭配产品：" in product_answer["answer"]
 assert all(product["name"] in product_answer["answer"] for product in tongue["product_details"])
 assert_neutral(product_answer)
+no_match_context = h._remember_image_context(no_match, "user-no-match")
+no_match_followup = h.chat_with_image_context("我平时需要注意什么？", "user-no-match", no_match_context)
+assert "未见四类典型倾向" in no_match_followup["answer"]
+assert "管理重点" in no_match_followup["answer"] and "可以先做" in no_match_followup["answer"]
+assert "保持三餐和作息规律" in no_match_followup["answer"]
 key_context = h._remember_image_context(tongue, "user-h")
 assert "搭配产品：" in h.chat_with_image_context("果燃畅通呢？", "user-h", key_context)["answer"]
 

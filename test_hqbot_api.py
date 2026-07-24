@@ -105,10 +105,126 @@ h._vision = lambda *args, **kwargs: {
     "quality_issues": ["舌缘未完整入镜"],
 }
 unclear = h.analyze_image(jpg)
-assert unclear["is_tongue"] and unclear["body_type"] == "未明确"
-assert unclear["products"] == [] and unclear["product_details"] == []
+assert unclear["is_tongue"] and unclear["body_type"] == "图片信息不足，暂无法判定"
+assert unclear["analysis_status"] == "image_unclear"
+assert unclear["symptoms"] == [] and unclear["products"] == [] and unclear["product_details"] == []
+assert unclear["check_guidance"] and unclear["product_guidance"]
+assert unclear["recommendation_status"] == "not_recommended"
+assert_neutral(unclear)
 assert "为避免误判，本次不强行归入某一体质" in unclear["answer"]
 assert "舌缘未完整入镜" in unclear["answer"]
+assert "搭配产品：暂不自动推荐具体产品" in unclear["answer"]
+
+h._vision = lambda *args, **kwargs: {
+    "type": "tongue",
+    "observation": "舌体正常，舌色偏红，齿痕不明显，舌苔薄白",
+    "body_type": "未见四类典型倾向",
+    "tongue_details": {
+        "tongue_body": "正常",
+        "tongue_color": "偏红",
+        "tooth_marks": "不明显",
+        "coating_color": "薄白",
+        "coating_thickness": "薄",
+        "coating_texture": "正常",
+        "coating_amount": "适中",
+        "moisture": "正常",
+        "fissures": "无",
+    },
+    "quality_issues": [],
+}
+no_match = h.analyze_image(jpg)
+assert no_match["analysis_status"] == "no_typical_match"
+assert no_match["body_type"] == h.NO_MATCH_BODY_TYPE
+assert no_match["symptoms"] == [] and no_match["products"] == [] and no_match["product_details"] == []
+assert no_match["check_guidance"] and no_match["product_guidance"]
+assert_neutral(no_match)
+assert all(text in no_match["answer"] for text in (
+    "舌照已经识别完成", "没有呈现现有四类典型倾向",
+    "可以先做", "搭配产品：暂不自动推荐具体产品",
+    "主要成分：本次没有具体产品推荐",
+))
+
+h._vision = lambda *args, **kwargs: {
+    "type": "Tongue ",
+    "observation": "舌体可见，但细节不足",
+    "body_type": "脾虚湿困型",
+    "tongue_details": {},
+    "quality_issues": [],
+}
+no_evidence = h.analyze_image(jpg)
+assert no_evidence["analysis_status"] == "image_unclear"
+assert no_evidence["product_details"] == []
+assert "可稳定辨认的舌象细节不足" in no_evidence["answer"]
+
+h._vision = lambda *args, **kwargs: {
+    "type": "tongue_unclear",
+    "observation": "舌体正常，舌色偏红，齿痕不明显，舌苔薄白",
+    "body_type": "",
+    "tongue_details": {
+        "tongue_body": "正常",
+        "tongue_color": "偏红",
+        "tooth_marks": "不明显",
+        "coating_color": "薄白",
+        "coating_thickness": "薄",
+        "coating_texture": "正常",
+        "coating_amount": "适中",
+        "moisture": "正常",
+        "fissures": "无",
+    },
+    "quality_issues": [],
+}
+clear_but_unmatched = h.analyze_image(jpg)
+assert clear_but_unmatched["analysis_status"] == "no_typical_match"
+assert clear_but_unmatched["body_type"] == h.NO_MATCH_BODY_TYPE
+assert clear_but_unmatched["product_details"] == []
+
+h._vision = lambda *args, **kwargs: {
+    "type": "tongue",
+    "observation": "舌象细节无法稳定辨认",
+    "body_type": "脾虚湿困型",
+    "tongue_details": {
+        "tongue_body": "模糊",
+        "tongue_color": "不确定",
+        "tooth_marks": "无法准确判断",
+    },
+    "quality_issues": [],
+}
+vague_details = h.analyze_image(jpg)
+assert vague_details["analysis_status"] == "image_unclear"
+assert vague_details["product_details"] == []
+
+h._vision = lambda *args, **kwargs: {
+    "type": "tongue",
+    "observation": "舌象信息不足",
+    "body_type": "气血两虚型",
+    "tongue_details": {
+        "tongue_body": "不能判断",
+        "tongue_color": "难以辨认",
+        "tooth_marks": "难辨",
+    },
+    "quality_issues": [],
+}
+uncertain_synonyms = h.analyze_image(jpg)
+assert uncertain_synonyms["analysis_status"] == "image_unclear"
+assert uncertain_synonyms["product_details"] == []
+
+h._vision = lambda *args, **kwargs: {
+    "type": "tongue",
+    "observation": "舌象可见但图片模糊",
+    "body_type": "脾虚湿困型",
+    "tongue_details": {
+        "tongue_body": "偏胖",
+        "tongue_color": "偏淡",
+        "tooth_marks": "有",
+        "coating_color": "白",
+        "coating_thickness": "薄",
+        "coating_texture": "略腻",
+    },
+    "quality_issues": ["图片模糊，无法稳定判断"],
+}
+quality_blocked = h.analyze_image(jpg)
+assert quality_blocked["analysis_status"] == "image_unclear"
+assert quality_blocked["product_details"] == []
 
 real_chat = h.chat
 h._vision = lambda *args, **kwargs: {

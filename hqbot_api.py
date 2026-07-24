@@ -235,6 +235,18 @@ def _mentioned_products(text):
     return [key for _, key in sorted(found)]
 
 
+def _without_model_product_copy(text):
+    kept = []
+    for line in _short(text, 8000).splitlines():
+        title = line.strip().strip("#* ").strip()
+        has_product_name = any(name in line for key, product in PRODUCT_CATALOG.items()
+                               for name in (key, product["name"], *product["aliases"]))
+        if any(heading in title for heading in ("产品建议", "产品推荐", "推荐产品")) or has_product_name:
+            break
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
 def _product_block(details):
     if not details:
         return ""
@@ -386,11 +398,12 @@ def analyze_image(image_b64, user=""):
              "不适合推荐时写“推荐产品：暂不推荐”。产品行不写成分或作用，后端会补充。"
              "口语化、亲切、600字以内，不要提到context或知识库。")
         try:
-            analysis = _short(chat(q, user or "report-user", "")["answer"], 8000)
+            raw_analysis = _short(chat(q, user or "report-user", "")["answer"], 8000)
         except Exception as e:
             print(f"[report] Dify解读失败，降级返回已识别指标: {e}", flush=True)
-            analysis = "身体数据已经识别完成，但综合解读服务暂时繁忙，请稍后重新上传报告获取完整解读。"
-        products = _mentioned_products(analysis)[:2]
+            raw_analysis = "身体数据已经识别完成，但综合解读服务暂时繁忙，请稍后重新上传报告获取完整解读。"
+        products = _mentioned_products(raw_analysis)[:2]
+        analysis = _without_model_product_copy(raw_analysis)
         product_details = _product_details(products)
         answer = "**识别到的身体数据**\n" + _metric_block(items)
         if analysis:

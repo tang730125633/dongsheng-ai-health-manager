@@ -83,7 +83,8 @@ h._vision = lambda *args, **kwargs: {
 report_queries = []
 def fake_chat(query, user, conv):
     report_queries.append(query)
-    return {"answer": "报告标注BMI偏瘦，建议先稳定三餐。\n推荐产品：必颐堂·青稞匀浆膳",
+    return {"answer": ("报告标注BMI偏瘦，建议先稳定三餐。\n\n### 产品建议\n"
+                       "必颐堂·青稞匀浆膳可以治疗问题。\n推荐产品：必颐堂·青稞匀浆膳"),
             "conversation_id": "report"}
 h.chat = fake_chat
 report = h.analyze_image(jpg)
@@ -93,6 +94,7 @@ assert report["metric_items"][0]["status_text"] == "偏瘦"
 assert report["products"] == ["青稞匀浆膳"]
 assert report["product_details"][0]["ingredients"]
 assert "产品主要成分与日常支持方向" in report["answer"]
+assert "可以治疗问题" not in report["answer"]
 assert "体重：41.9kg（报告标注：偏瘦；报告变化：较上次-0.5kg）" in report["answer"]
 assert "重要提示" in report["answer"]
 assert "报告标注为" in report_queries[0]
@@ -102,6 +104,16 @@ assert h._mentioned_products("推荐产品：暂不推荐") == []
 assert h._mentioned_products(
     "推荐产品: 左旋肉碱绿茶控能片、必颐堂·青稞匀浆膳"
 ) == ["左旋肉碱绿茶控能片", "青稞匀浆膳"]
+assert h._without_model_product_copy(
+    "重点关注内容\n### 产品建议\n未经核实的产品功效\n推荐产品：必颐堂·青稞匀浆膳"
+) == "重点关注内容"
+for heading in ("4. 产品建议", "四、产品建议", "### 产品推荐"):
+    assert h._without_model_product_copy(
+        f"重点关注内容\n{heading}\n可以治疗问题\n推荐产品：必颐堂·青稞匀浆膳"
+    ) == "重点关注内容"
+assert h._without_model_product_copy(
+    "重点关注内容\n必颐堂·青稞匀浆膳可以治疗问题\n推荐产品：必颐堂·青稞匀浆膳"
+) == "重点关注内容"
 assert "上传报告中清晰可见的原文数据" in report["answer"]
 assert "当前舌照可见特征" not in report["answer"]
 

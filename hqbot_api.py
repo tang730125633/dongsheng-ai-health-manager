@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """东晟时代统一后端服务。监听 :8093。视觉复用黄雀主站 OpenAI 配置，问答密钥读 /opt/dify.key。
 接口:
-  POST /api/tongue   {"image":"<base64>"} → 舌诊结构化结果；非舌照自动尝试识别体测报告→解读+产品推荐(tip字段)
-  POST /api/chat     {"query":..,"user":..,"conversation_id":..(可选)} → {answer, conversation_id}
+  POST /api/tongue   {"image":"<base64>","user":..(可选)} → 图片结果；有user时附一次性context_id
+  POST /api/chat     {"query":..,"user":..,"conversation_id":..(可选),"context_id":..(可选)}
   GET  /health
 """
-import base64, json, os, unicodedata, urllib.error, urllib.request, http.server, socketserver
+import base64, json, os, secrets, threading, time, unicodedata, urllib.error, urllib.request, http.server, socketserver
 
 DIFY_KEY = os.environ.get("DIFY_KEY") or open("/opt/dify.key").read().strip()
 DIFY = "http://127.0.0.1/v1/chat-messages"   # Dify 就在本机
@@ -290,10 +290,168 @@ def _product_block(details):
         return ""
     rows = []
     for i, product in enumerate(details, 1):
-        rows.append(f"{i}. **{product['name']}**\n"
-                    f"   - 主要成分：{'、'.join(product['ingredients'])}\n"
-                    f"   - 日常支持方向：{product['benefit']}")
+        rows.append(f"{i}. **搭配产品：{product['name']}**\n"
+                    f"   - 搭配调理方向：{product['benefit']}\n"
+                    f"   - 主要成分：{'、'.join(product['ingredients'])}")
     return "\n".join(rows) + "\n\n" + PRODUCT_NOTICE
+
+
+IMAGE_CONTEXT_TTL = 600
+IMAGE_CONTEXT_MAX = 1000
+_IMAGE_CONTEXTS = {}
+_IMAGE_CONTEXT_LOCK = threading.Lock()
+
+
+class ContextUnavailable(Exception):
+    pass
+
+
+class ContextInUse(Exception):
+    pass
+
+
+def _image_context_data(result):
+    products = [{"key": _short(item.get("key"), 80),
+                 "name": _short(item.get("name"), 100),
+                 "ingredients": [_short(value, 60) for value in item.get("ingredients", [])[:20]],
+                 "support_direction": _short(item.get("benefit"), 240)}
+                for item in result.get("product_details", [])[:3] if isinstance(item, dict)]
+    if result.get("is_tongue"):
+        profile = BODY_MAP.get(result.get("body_type"), {})
+        return {
+            "image_type": "tongue",
+            "observation": _short(result.get("observation"), 300),
+            "body_type": _short(result.get("body_type"), 40),
+            "tongue_details": {key: _short(result.get("tongue_details", {}).get(key), 40)
+                               for key, _ in TONGUE_FIELDS},
+            "quality_issues": [_short(value, 80) for value in result.get("quality_issues", [])[:8]],
+            "symptoms_to_verify": [_short(value, 80) for value in result.get("symptoms", [])[:10]],
+            "management_focus": _short(profile.get("focus"), 200),
+            "safe_actions": [_short(value, 120) for value in profile.get("advice", [])[:5]],
+            "candidate_products": products,
+        }
+    if result.get("is_report"):
+        return {
+            "image_type": "report",
+            "metric_items": [{key: _short(item.get(key), 80)
+                              for key in ("name", "display_value", "status_text",
+                                          "reference_text", "change_text")}
+                             for item in result.get("metric_items", [])[:40]
+                             if isinstance(item, dict)],
+            "trend": _short(result.get("trend"), 300),
+            "candidate_products": products,
+        }
+    return {}
+
+
+def _purge_image_contexts(now):
+    for token, item in list(_IMAGE_CONTEXTS.items()):
+        if item["expires_at"] <= now:
+            _IMAGE_CONTEXTS.pop(token, None)
+
+
+def _remember_image_context(result, user):
+    user = _short(user, 160)
+    if not user:
+        return ""
+    data = _image_context_data(result)
+    now = time.time()
+    with _IMAGE_CONTEXT_LOCK:
+        _purge_image_contexts(now)
+        # ponytail: process-local O(n) cache is enough for one worker; use Redis only if the service becomes multi-worker.
+        for token, item in list(_IMAGE_CONTEXTS.items()):
+            if item["user"] == user:
+                _IMAGE_CONTEXTS.pop(token, None)
+        if not data:
+            return ""
+        while len(_IMAGE_CONTEXTS) >= IMAGE_CONTEXT_MAX:
+            _IMAGE_CONTEXTS.pop(next(iter(_IMAGE_CONTEXTS)))
+        token = secrets.token_urlsafe(24)
+        _IMAGE_CONTEXTS[token] = {"user": user, "data": data,
+                                  "expires_at": now + IMAGE_CONTEXT_TTL, "state": "ready"}
+    return token
+
+
+def _claim_image_context(token, user):
+    token, user = _short(token, 200), _short(user, 160)
+    now = time.time()
+    with _IMAGE_CONTEXT_LOCK:
+        _purge_image_contexts(now)
+        item = _IMAGE_CONTEXTS.get(token)
+        if not token or not user or not item or item["user"] != user:
+            raise ContextUnavailable()
+        if item["state"] != "ready":
+            raise ContextInUse()
+        item["state"] = "in_use"
+        return item["data"]
+
+
+def _finish_image_context(token, success):
+    with _IMAGE_CONTEXT_LOCK:
+        item = _IMAGE_CONTEXTS.get(token)
+        if not item:
+            return
+        if success or item["expires_at"] <= time.time():
+            _IMAGE_CONTEXTS.pop(token, None)
+        else:
+            item["state"] = "ready"
+
+
+CONTEXT_PRODUCT_QUERY_TERMS = ("产品", "搭配", "成分", "功效", "作用", "保健品", "补充剂",
+                               "适合吃", "能吃", "可以吃", "怎么吃", "服用", "用药", "药",
+                               "剂量", "用量", "奥利司他", "司美格鲁肽", "利拉鲁肽", "替尔泊肽")
+
+
+def _is_product_question(query, data):
+    text = _compact_text(query)
+    return (any(_compact_text(term) in text for term in CONTEXT_PRODUCT_QUERY_TERMS)
+            or any(any(name and _compact_text(name) in text
+                       for name in (product.get("key"), product["name"]))
+                   for product in data.get("candidate_products", [])))
+
+
+def _fixed_context_products(data):
+    products = [{"name": product["name"], "ingredients": product["ingredients"],
+                 "benefit": product["support_direction"]}
+                for product in data.get("candidate_products", [])]
+    if not products:
+        return ("上一张图片不足以确认适合搭配的产品。本次不新增推荐；"
+                "请补充个人基本情况、过敏、慢病和正在用药信息后再评估。")
+    return ("**推荐产品**\n"
+            "上一张图片只能用于展示后端受控的候选搭配，不能据此判断其他产品或药品是否适合：\n\n"
+            + _product_block(products))
+
+
+def _safe_context_fallback(data):
+    if data["image_type"] == "tongue":
+        details = "、".join(f"{label}：{data['tongue_details'].get(key) or '看不清'}"
+                           for key, label in TONGUE_FIELDS)
+        answer = (f"**上一张舌照结果**\n体质倾向：{data.get('body_type') or '未明确'}\n"
+                  f"可见特征：{details}")
+        if data.get("management_focus"):
+            answer += f"\n\n**管理重点**\n{data['management_focus']}"
+        if data.get("safe_actions"):
+            answer += "\n\n**可以先做**\n" + "\n".join(
+                f"{i}. {value}" for i, value in enumerate(data["safe_actions"], 1))
+        return answer
+    metrics = "、".join(f"{item['name']}：{item['display_value']}"
+                       for item in data.get("metric_items", [])[:12])
+    return (f"**上一张体测报告数据**\n{metrics}\n\n"
+            "请以报告原文标注为线索，结合近期饮食、活动、睡眠和身体感受继续观察；"
+            "数值持续异常或出现不适时，请咨询医生。")
+
+
+def chat_with_image_context(query, user, token):
+    data = _claim_image_context(token, user)
+    try:
+        answer = (_fixed_context_products(data) if _is_product_question(query, data)
+                  else _safe_context_fallback(data))
+    except Exception:
+        _finish_image_context(token, False)
+        raise
+    _finish_image_context(token, True)
+    return {"answer": answer, "conversation_id": "", "context_consumed": True,
+            "reset_conversation": True}
 
 
 def _tongue_answer(observation, body_type, profile, details, products):
@@ -323,8 +481,8 @@ def _tongue_answer(observation, body_type, profile, details, products):
 **下一步**
 下一条请同时写上“本次初步倾向：{body_type}”，并补充睡眠、食欲、排便、怕冷或燥热，以及个人基本情况、慢病、过敏和正在用药情况；也可以上传体测报告。
 
-**候选产品资料（非食用建议）**
-以下只按当前体质倾向展示候选资料。单张舌照不足以决定是否适合食用；完成体测、过敏、基础病、用药和其他特殊情况核对前，请勿据此开始食用：
+**推荐产品**
+以下只按当前体质倾向展示候选搭配，不代表已经确认适合食用。单张舌照不足以决定是否适合食用；完成体测、过敏、基础病、用药和其他特殊情况核对前，请勿据此开始食用：
 
 {product_text}
 
@@ -454,7 +612,7 @@ def analyze_image(image_b64, user=""):
         if analysis:
             answer += "\n\n" + analysis
         if product_details:
-            answer += "\n\n**产品主要成分与日常支持方向**\n" + _product_block(product_details)
+            answer += "\n\n**推荐产品**\n" + _product_block(product_details)
         answer += "\n\n**重要提示**\n" + REPORT_TIP
         return {"is_tongue": False, "is_report": True, "metrics": m, "metric_items": items,
                 "trend": trend, "products": products,
@@ -509,12 +667,31 @@ class H(http.server.BaseHTTPRequestHandler):
             if self.path == "/api/tongue":
                 import time as _t
                 t0 = _t.time()
-                res = analyze_image(data["image"], data.get("user", ""))
+                user = data.get("user", "")
+                res = analyze_image(data["image"], user)
+                context_id = _remember_image_context(res, user)
                 kind = "tongue" if res.get("is_tongue") else ("report" if res.get("is_report") else "other")
                 print(f"[img] kind={kind} {_t.time()-t0:.1f}s", flush=True)
-                self._send({"ok": True, **res})
+                payload = {"ok": True, **res}
+                if context_id:
+                    payload.update({"context_id": context_id,
+                                    "context_expires_in": IMAGE_CONTEXT_TTL})
+                self._send(payload)
             elif self.path == "/api/chat":
-                self._send({"ok": True, **chat(data.get("query", ""), data.get("user", ""), data.get("conversation_id", ""))})
+                context_id = data.get("context_id", "")
+                if context_id:
+                    try:
+                        result = chat_with_image_context(data.get("query", ""), data.get("user", ""), context_id)
+                    except ContextInUse:
+                        self._send({"ok": False, "error": "context_in_use"}, 409)
+                        return
+                    except ContextUnavailable:
+                        self._send({"ok": False, "error": "context_unavailable"}, 410)
+                        return
+                else:
+                    result = chat(data.get("query", ""), data.get("user", ""),
+                                  data.get("conversation_id", ""))
+                self._send({"ok": True, **result})
             else:
                 self._send({"ok": False, "error": "not found"}, 404)
         except Exception as e:

@@ -12,6 +12,8 @@ import hqbot_api as h
 
 assert h.OPENAI == "https://example.com/openai/v1/chat/completions"
 assert "不做体质分类" in h.UNIFIED_SYS
+assert "即使带有手机状态栏、返回键或页面按钮，也仍按report处理" in h.UNIFIED_SYS
+assert "页面中即使有很大的舌照，也必须标为screenshot并归为other" in h.UNIFIED_SYS
 assert not any(body_type in h.UNIFIED_SYS for body_type in h.BODY_MAP)
 assert h._body_type_from_details({
     "tongue_body": "胖大", "tongue_color": "偏淡", "tooth_marks": "明显",
@@ -72,6 +74,7 @@ assert h._image_url(webp).startswith("data:image/webp;base64,")
 
 h._vision = lambda *args, **kwargs: {
     "type": "tongue",
+    "image_source": "direct_tongue_photo",
     "observation": "舌体偏胖，舌色偏淡，边缘可见齿痕，舌苔白且偏厚",
     "body_type": "故意给错的寒凝气滞型",
     "tongue_details": {
@@ -108,6 +111,7 @@ assert "完成体测、过敏、基础病、用药和其他特殊情况核对前
 
 h._vision = lambda *args, **kwargs: {
     "type": "tongue",
+    "image_source": "direct_tongue_photo",
     "observation": "舌色淡紫，女性可能月经量少",
     "body_type": "宫寒气滞型",
     "tongue_details": {
@@ -126,6 +130,7 @@ assert_neutral(neutral_tongue)
 
 h._vision = lambda *args, **kwargs: {
     "type": "tongue_unclear",
+    "image_source": "direct_tongue_photo",
     "observation": "舌体可见，但舌缘模糊",
     "tongue_details": {"tongue_body": "看不清", "tongue_color": "偏淡"},
     "quality_issues": ["舌缘未完整入镜"],
@@ -143,6 +148,7 @@ assert "搭配产品：暂不自动推荐具体产品" in unclear["answer"]
 
 h._vision = lambda *args, **kwargs: {
     "type": "tongue",
+    "image_source": "direct_tongue_photo",
     "observation": "舌体正常，舌色偏红，齿痕不明显，舌苔薄白",
     "body_type": "未见四类典型倾向",
     "tongue_details": {
@@ -172,6 +178,7 @@ assert all(text in no_match["answer"] for text in (
 
 h._vision = lambda *args, **kwargs: {
     "type": "Tongue ",
+    "image_source": "direct_tongue_photo",
     "observation": "舌体可见，但细节不足",
     "body_type": "脾虚湿困型",
     "tongue_details": {},
@@ -184,6 +191,7 @@ assert "可稳定辨认的舌象细节不足" in no_evidence["answer"]
 
 h._vision = lambda *args, **kwargs: {
     "type": "tongue_unclear",
+    "image_source": "direct_tongue_photo",
     "observation": "舌体正常，舌色偏红，齿痕不明显，舌苔薄白",
     "body_type": "",
     "tongue_details": {
@@ -206,6 +214,7 @@ assert clear_but_unmatched["product_details"] == []
 
 h._vision = lambda *args, **kwargs: {
     "type": "tongue",
+    "image_source": "direct_tongue_photo",
     "observation": "舌象细节无法稳定辨认",
     "body_type": "脾虚湿困型",
     "tongue_details": {
@@ -221,6 +230,7 @@ assert vague_details["product_details"] == []
 
 h._vision = lambda *args, **kwargs: {
     "type": "tongue",
+    "image_source": "direct_tongue_photo",
     "observation": "舌象信息不足",
     "body_type": "气血两虚型",
     "tongue_details": {
@@ -236,6 +246,7 @@ assert uncertain_synonyms["product_details"] == []
 
 h._vision = lambda *args, **kwargs: {
     "type": "tongue",
+    "image_source": "direct_tongue_photo",
     "observation": "舌象可见但图片模糊",
     "body_type": "脾虚湿困型",
     "tongue_details": {
@@ -253,8 +264,9 @@ assert quality_blocked["analysis_status"] == "image_unclear"
 assert quality_blocked["product_details"] == []
 
 real_chat = h.chat
-h._vision = lambda *args, **kwargs: {
+report_payload = {
     "type": "report",
+    "image_source": "report",
     "metric_items": [
         {"name": "体重", "display_value": "41.9kg", "status_text": "偏瘦",
          "reference_text": "", "change_text": "较上次-0.5kg"},
@@ -265,6 +277,7 @@ h._vision = lambda *args, **kwargs: {
     ],
     "trend": "体重较上次下降0.5kg",
 }
+h._vision = lambda *args, **kwargs: report_payload
 report_queries = []
 def fake_chat(query, user, conv):
     report_queries.append(query)
@@ -317,20 +330,81 @@ assert h._neutral_generated_text("安全内容\n月\n經\n量少") == ""
 assert "上传报告中清晰可见的原文数据" in report["answer"]
 assert "当前舌照可见特征" not in report["answer"]
 
+for report_source in (None, "invalid", "screenshot"):
+    variant = dict(report_payload)
+    if report_source is None:
+        variant.pop("image_source")
+    else:
+        variant["image_source"] = report_source
+    h._vision = lambda *args, variant=variant, **kwargs: variant
+    normalized_report = h.analyze_image(jpg)
+    assert normalized_report["is_report"]
+    assert normalized_report["image_source"] == "report"
+
+h._vision = lambda *args, **kwargs: {
+    "type": "report",
+    "image_source": "screenshot",
+    "metric_items": [],
+}
+invalid_report = h.analyze_image(jpg)
+assert not invalid_report["is_report"]
+assert invalid_report["image_source"] == "report"
+assert invalid_report["tip"]
+
 def failed_chat(*args):
     raise RuntimeError("dify down")
 h.chat = failed_chat
+h._vision = lambda *args, **kwargs: report_payload
 degraded = h.analyze_image(jpg)
 assert degraded["is_report"] and degraded["metric_items"]
 assert degraded["products"] == []
 assert "综合解读服务暂时繁忙" in degraded["answer"]
 h._vision = lambda *args, **kwargs: {
     "type": "other",
+    "image_source": "other",
     "summary": "图片中是一张舌照\n根据外观判断为女性，月经量少",
 }
 other = h.analyze_image(jpg)
 assert other["tip"] == "图片中是一张舌照"
 assert_neutral(other)
+
+h._vision = lambda *args, **kwargs: {
+    "type": "tongue",
+    "image_source": "screenshot",
+    "observation": "界面中有一张舌照",
+    "tongue_details": {
+        "tongue_body": "胖大",
+        "tongue_color": "偏淡",
+        "tooth_marks": "明显",
+        "coating_color": "白",
+        "coating_thickness": "厚",
+        "coating_texture": "腻",
+    },
+}
+screenshot = h.analyze_image(jpg)
+assert not screenshot["is_tongue"] and screenshot["image_source"] == "screenshot"
+assert "聊天或页面截图" in screenshot["tip"]
+assert "不会直接用于舌象判定或产品推荐" in screenshot["tip"]
+assert h._remember_image_context(screenshot, "user-screenshot") == ""
+
+h._vision = lambda *args, **kwargs: {
+    "type": "other",
+    "image_source": "screenshot",
+    "summary": "商品介绍页面，文字写有主要成分和日常支持方向。",
+}
+product_screenshot = h.analyze_image(jpg)
+assert "商品介绍页面" in product_screenshot["tip"]
+assert "包含舌照" not in product_screenshot["tip"]
+assert "不会直接用于舌象判定" in product_screenshot["tip"]
+
+h._vision = lambda *args, **kwargs: {
+    "type": "tongue",
+    "observation": "缺少来源字段",
+    "tongue_details": {"tongue_body": "正常", "tongue_color": "淡红"},
+}
+missing_source = h.analyze_image(jpg)
+assert not missing_source["is_tongue"] and missing_source["image_source"] == "other"
+assert missing_source["tip"]
 h.chat = real_chat
 
 context_id = h._remember_image_context(tongue, "user-a")

@@ -34,7 +34,7 @@ assert h._body_type_from_details({
 assert h._body_type_from_details({
     "tongue_body": "正常", "tongue_color": "淡红", "tooth_marks": "不明显",
     "coating_color": "白", "coating_thickness": "薄", "coating_texture": "普通",
-}) == ""
+}) == "脾虚湿困型"
 assert h._body_type_from_details({
     "tongue_body": "难以辨认，胖嫩", "tongue_color": "难以辨认，淡白",
     "tooth_marks": "难辨，浅",
@@ -43,7 +43,28 @@ assert h._body_type_from_details({"tongue_color": "不淡紫"}) == ""
 assert h._body_type_from_details({
     "tongue_body": "淡胖", "tongue_color": "偏淡", "tooth_marks": "没有",
     "coating_color": "白", "coating_thickness": "薄",
-}) == ""
+}) == "脾虚湿困型"
+weighted_cases = {
+    "痰湿蕴盛型": {
+        "tongue_body": "胖大", "tongue_color": "偏红", "tooth_marks": "明显",
+        "coating_color": "黄", "coating_thickness": "厚", "coating_texture": "腻",
+    },
+    "脾虚湿困型": {
+        "tongue_body": "淡胖", "tongue_color": "偏淡", "tooth_marks": "有",
+        "coating_color": "白", "coating_thickness": "薄", "coating_texture": "普通",
+    },
+    "气血两虚型": {
+        "tongue_body": "胖嫩", "tongue_color": "淡白", "tooth_marks": "浅",
+        "coating_color": "无苔", "coating_thickness": "少苔", "moisture": "干",
+    },
+    "寒凝气滞型": {
+        "tongue_body": "正常", "tongue_color": "淡紫", "tooth_marks": "无",
+        "coating_color": "白", "coating_thickness": "薄",
+    },
+}
+assert {h._body_type_from_details(details) for details in weighted_cases.values()} == set(weighted_cases)
+assert len({tuple(h._tongue_specific_advice(h._tongue_details(details), h.BODY_MAP[body_type]))
+            for body_type, details in weighted_cases.items()}) == 4
 for profile in h.BODY_MAP.values():
     assert len(h._product_details(profile["products"])) == len(profile["products"])
 assert not any(word in product["benefit"] for product in h.PRODUCT_CATALOG.values()
@@ -64,7 +85,9 @@ for body_type, profile in h.BODY_MAP.items():
         "symptoms": profile["symptoms"],
         "products": profile["products"],
         "product_details": product_details,
-        "answer": h._tongue_answer("舌象可见", body_type, profile, neutral_details, product_details),
+        "answer": h._tongue_answer(
+            "舌象可见", body_type, next(key for key in h.BODY_MAP if key != body_type),
+            "中等", profile, neutral_details, product_details),
     })
 
 jpg = base64.b64encode(b"\xff\xd8\xfftest").decode()
@@ -165,15 +188,15 @@ h._vision = lambda *args, **kwargs: {
     "quality_issues": [],
 }
 no_match = h.analyze_image(jpg)
-assert no_match["analysis_status"] == "no_typical_match"
-assert no_match["body_type"] == h.NO_MATCH_BODY_TYPE
-assert no_match["symptoms"] == [] and no_match["products"] == [] and no_match["product_details"] == []
-assert no_match["check_guidance"] and no_match["product_guidance"]
+assert no_match["analysis_status"] == "matched"
+assert no_match["body_type"] == "脾虚湿困型"
+assert no_match["secondary_body_type"] == "气血两虚型"
+assert no_match["symptoms"] and no_match["products"] == [] and no_match["product_details"] == []
+assert no_match["key_findings"] and no_match["match_strength"] == "较弱"
 assert_neutral(no_match)
 assert all(text in no_match["answer"] for text in (
-    "舌照已经识别完成", "没有呈现现有四类典型倾向",
-    "可以先做", "搭配产品：暂不自动推荐具体产品",
-    "主要成分：本次没有具体产品推荐",
+    "这张图的关键区别", "主倾向更接近", "次倾向为",
+    "今天可以先做", "当前图片信息不足，本次不展示候选产品",
 ))
 
 h._vision = lambda *args, **kwargs: {
@@ -208,8 +231,9 @@ h._vision = lambda *args, **kwargs: {
     "quality_issues": [],
 }
 clear_but_unmatched = h.analyze_image(jpg)
-assert clear_but_unmatched["analysis_status"] == "no_typical_match"
-assert clear_but_unmatched["body_type"] == h.NO_MATCH_BODY_TYPE
+assert clear_but_unmatched["analysis_status"] == "matched"
+assert clear_but_unmatched["body_type"] == "脾虚湿困型"
+assert clear_but_unmatched["key_findings"]
 assert clear_but_unmatched["product_details"] == []
 
 h._vision = lambda *args, **kwargs: {
@@ -466,9 +490,9 @@ assert all(product["name"] in product_answer["answer"] for product in tongue["pr
 assert_neutral(product_answer)
 no_match_context = h._remember_image_context(no_match, "user-no-match")
 no_match_followup = h.chat_with_image_context("我平时需要注意什么？", "user-no-match", no_match_context)
-assert "未见四类典型倾向" in no_match_followup["answer"]
+assert "脾虚湿困型" in no_match_followup["answer"]
 assert "管理重点" in no_match_followup["answer"] and "可以先做" in no_match_followup["answer"]
-assert "保持三餐和作息规律" in no_match_followup["answer"]
+assert "三餐" in no_match_followup["answer"]
 key_context = h._remember_image_context(tongue, "user-h")
 assert "搭配产品：" in h.chat_with_image_context("果燃畅通呢？", "user-h", key_context)["answer"]
 

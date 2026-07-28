@@ -281,24 +281,107 @@ def _detail_value(value, key):
     return text
 
 
-def _body_type_from_details(value):
+def _body_type_scores(value):
     body = _detail_value(value, "tongue_body")
     color = _detail_value(value, "tongue_color")
     marks = _detail_value(value, "tooth_marks")
     coat_color = _detail_value(value, "coating_color")
     coat_thickness = _detail_value(value, "coating_thickness")
     coat_texture = _detail_value(value, "coating_texture")
-    if color in ("淡紫", "青暗", "紫暗", "青紫"):
-        return "寒凝气滞型"
-    if body == "胖大" and color in ("偏淡", "淡白") and marks in ("明显", "有") and (
-            coat_color == "白" and coat_thickness == "厚" and coat_texture == "腻"):
-        return "痰湿蕴盛型"
-    if body == "胖嫩" and color == "淡白" and marks == "浅":
-        return "气血两虚型"
-    if body == "淡胖" and color in ("偏淡", "淡白") and marks in ("明显", "有", "浅") and (
-            coat_color == "白" and coat_thickness == "薄"):
-        return "脾虚湿困型"
-    return ""
+    coat_amount = _detail_value(value, "coating_amount")
+    moisture = _detail_value(value, "moisture")
+    fissures = _detail_value(value, "fissures")
+    scores = {body_type: 0 for body_type in BODY_MAP}
+
+    def add(body_type, points, actual, expected):
+        if actual in expected:
+            scores[body_type] += points
+
+    add("痰湿蕴盛型", 4, body, ("胖大",))
+    add("痰湿蕴盛型", 2, body, ("偏胖",))
+    add("脾虚湿困型", 4, body, ("淡胖",))
+    add("脾虚湿困型", 1, body, ("偏胖",))
+    add("气血两虚型", 4, body, ("胖嫩",))
+    add("气血两虚型", 2, body, ("偏瘦",))
+    add("寒凝气滞型", 1, body, ("正常", "偏瘦"))
+
+    add("气血两虚型", 4, color, ("淡白",))
+    add("气血两虚型", 2, color, ("偏淡",))
+    add("脾虚湿困型", 3, color, ("偏淡",))
+    add("脾虚湿困型", 2, color, ("淡白",))
+    add("脾虚湿困型", 1, color, ("淡红",))
+    add("痰湿蕴盛型", 1, color, ("偏红",))
+    add("寒凝气滞型", 6, color, ("淡紫", "青暗", "紫暗", "青紫"))
+
+    add("痰湿蕴盛型", 3, marks, ("明显", "有"))
+    add("脾虚湿困型", 2, marks, ("明显", "有", "浅"))
+    add("气血两虚型", 2, marks, ("浅",))
+    add("气血两虚型", 1, marks, ("不明显",))
+    add("寒凝气滞型", 1, marks, ("不明显", "无"))
+
+    add("痰湿蕴盛型", 3, coat_color, ("黄",))
+    add("痰湿蕴盛型", 2, coat_color, ("灰黑",))
+    add("脾虚湿困型", 1, coat_color, ("白",))
+    add("寒凝气滞型", 1, coat_color, ("白", "灰黑"))
+    add("气血两虚型", 2, coat_color, ("无苔",))
+
+    add("痰湿蕴盛型", 4, coat_thickness, ("厚",))
+    add("脾虚湿困型", 2, coat_thickness, ("薄",))
+    add("气血两虚型", 3, coat_thickness, ("少苔", "无苔"))
+    add("气血两虚型", 1, coat_thickness, ("薄",))
+
+    add("痰湿蕴盛型", 4, coat_texture, ("腻",))
+    add("痰湿蕴盛型", 3, coat_texture, ("腐",))
+    add("脾虚湿困型", 1, coat_texture, ("普通",))
+    add("痰湿蕴盛型", 2, coat_amount, ("多",))
+    add("脾虚湿困型", 1, coat_amount, ("适中",))
+    add("气血两虚型", 2, coat_amount, ("少", "无"))
+    add("痰湿蕴盛型", 1, moisture, ("润",))
+    add("脾虚湿困型", 1, moisture, ("润", "正常"))
+    add("气血两虚型", 2, moisture, ("干",))
+    add("寒凝气滞型", 1, moisture, ("干",))
+    add("气血两虚型", 2, fissures, ("明显",))
+    add("气血两虚型", 1, fissures, ("浅",))
+    return scores
+
+
+def _body_type_ranking(value):
+    scores = _body_type_scores(value)
+    ranked = sorted(scores, key=lambda body_type: (-scores[body_type], list(BODY_MAP).index(body_type)))
+    return ranked[0], ranked[1], scores
+
+
+def _body_type_from_details(value):
+    body_type, _, scores = _body_type_ranking(value)
+    return body_type if scores[body_type] else ""
+
+
+def _tongue_key_findings(details):
+    ordinary = {"正常", "普通", "适中", "无", "不明显", "看不清"}
+    findings = [f"{label}：{details[key]}" for key, label in TONGUE_FIELDS
+                if details.get(key) not in ordinary]
+    if not findings:
+        findings = [f"{label}：{details[key]}" for key, label in TONGUE_FIELDS
+                    if details.get(key) != "看不清"]
+    return findings[:4]
+
+
+def _tongue_specific_advice(details, profile):
+    advice = []
+    if details["coating_thickness"] == "厚" or details["coating_texture"] in ("腻", "腐"):
+        advice.append("这张图的舌苔偏厚或偏腻，先连续一周减少油炸、甜饮、夜宵和酒")
+    if details["coating_color"] in ("黄", "灰黑") or details["tongue_color"] == "偏红":
+        advice.append("舌色或舌苔颜色偏深，近期少吃辛辣刺激食物并避免连续熬夜")
+    if details["moisture"] == "干" or details["coating_amount"] in ("少", "无"):
+        advice.append("舌面偏干或舌苔偏少，白天分次饮水，避免一次大量灌水")
+    if details["tongue_color"] in ("偏淡", "淡白"):
+        advice.append("舌色偏淡，先保证规律三餐和蛋白质、蔬菜等基础营养，不要过度节食")
+    if details["tooth_marks"] in ("明显", "有", "浅") or details["tongue_body"] in ("胖大", "淡胖", "偏胖"):
+        advice.append("舌体偏胖或有齿痕，可记录一周食欲、饭后感受、排便和晨起状态")
+    for item in profile["advice"]:
+        if item not in advice:
+            advice.append(item)
+    return advice[:3]
 
 
 def _product_details(names):
@@ -510,8 +593,11 @@ def chat_with_image_context(query, user, token):
             "reset_conversation": True}
 
 
-def _tongue_answer(observation, body_type, profile, details, products):
-    advice = "\n".join(f"{i}. {text}" for i, text in enumerate(profile["advice"], 1))
+def _tongue_answer(observation, body_type, secondary_type, match_strength,
+                   profile, details, products):
+    advice = "\n".join(
+        f"{i}. {text}" for i, text in enumerate(_tongue_specific_advice(details, profile), 1))
+    findings = "；".join(_tongue_key_findings(details))
     detail_text = "\n".join(f"- {label}：{details[key]}" for key, label in TONGUE_FIELDS)
     product_text = _product_block(products) or "当前图片信息不足，本次不展示候选产品；请补充个人基本情况后再评估。"
     return f"""**初步舌象**
@@ -520,8 +606,11 @@ def _tongue_answer(observation, body_type, profile, details, products):
 **舌象细节**
 {detail_text}
 
+**这张图的关键区别**
+{findings}
+
 **体质倾向**
-按当前规则更偏向**{body_type}**。这个标签用于后续核对生活习惯和身体感受，不代表疾病诊断。
+按当前可见特征，主倾向更接近**{body_type}**，次倾向为**{secondary_type}**，匹配强度为**{match_strength}**。这个标签用于后续核对生活习惯和身体感受，不代表疾病诊断。
 用白话说，{profile["plain"]}。
 
 **常见表现，请你核对**
@@ -686,7 +775,7 @@ def analyze_image(image_b64, user=""):
             bt = ""
         elif t == "tongue_unclear" and clear_no_match:
             t = "tongue"
-            bt = ""
+            bt = _body_type_from_details(raw_details)
         elif not bt and not clear_no_match:
             t = "tongue_unclear"
             if not issues:
@@ -705,14 +794,23 @@ def analyze_image(image_b64, user=""):
                     "product_guidance": NO_PRODUCT_GUIDANCE,
                     "recommendation_status": "not_recommended",
                     "answer": answer, "tip": answer}
+        bt, secondary_type, scores = _body_type_ranking(raw_details)
+        score = scores[bt]
+        match_strength = "较强" if score >= 10 else ("中等" if score >= 6 else "较弱")
         m = BODY_MAP[bt]
-        products = _product_details(m["products"])
-        answer = _tongue_answer(observation, bt, m, details, products)
+        product_keys = m["products"] if score >= 6 else []
+        products = _product_details(product_keys)
+        answer = _tongue_answer(
+            observation, bt, secondary_type, match_strength, m, details, products)
         return {"is_tongue": True, "analysis_status": "matched",
                 "image_source": source,
                 "observation": observation, "body_type": bt,
+                "secondary_body_type": secondary_type,
+                "match_strength": match_strength,
+                "match_score": score,
+                "key_findings": _tongue_key_findings(details),
                 "tongue_details": details, "quality_issues": issues,
-                "symptoms": m["symptoms"], "products": m["products"],
+                "symptoms": m["symptoms"], "products": product_keys,
                 "product_details": products, "product_notice": PRODUCT_NOTICE,
                 "answer": answer, "tip": answer}
     if t == "report":

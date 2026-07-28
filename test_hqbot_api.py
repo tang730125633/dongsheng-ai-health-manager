@@ -131,6 +131,10 @@ assert all(text in tongue["answer"] for text in (
 ))
 assert not any(word in tongue["answer"] for word in ("治疗痛经", "燃脂翻倍", "控糖稳血糖"))
 assert "完成体测、过敏、基础病、用药和其他特殊情况核对前，请勿据此开始食用" in tongue["answer"]
+second_jpg = base64.b64encode(b"\xff\xd8\xffdifferent").decode()
+same_details_other_image = h.analyze_image(second_jpg)
+assert same_details_other_image["body_type"] == tongue["body_type"]
+assert same_details_other_image["answer"] != tongue["answer"]
 
 h._vision = lambda *args, **kwargs: {
     "type": "tongue",
@@ -159,13 +163,15 @@ h._vision = lambda *args, **kwargs: {
     "quality_issues": ["舌缘未完整入镜"],
 }
 unclear = h.analyze_image(jpg)
-assert unclear["is_tongue"] and unclear["body_type"] == "图片信息不足，暂无法判定"
+assert unclear["is_tongue"] and unclear["body_type"] == "脾虚湿困型"
 assert unclear["analysis_status"] == "image_unclear"
 assert unclear["symptoms"] == [] and unclear["products"] == [] and unclear["product_details"] == []
 assert unclear["check_guidance"] and unclear["product_guidance"]
 assert unclear["recommendation_status"] == "not_recommended"
 assert_neutral(unclear)
-assert "为避免误判，本次不强行归入某一体质" in unclear["answer"]
+assert "较弱（图片质量受限）" in unclear["match_strength"]
+assert "当前可见部分更接近" in unclear["answer"]
+assert "仍可辨认的重点" in unclear["answer"]
 assert "舌缘未完整入镜" in unclear["answer"]
 assert "搭配产品：暂不自动推荐具体产品" in unclear["answer"]
 

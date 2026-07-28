@@ -5,7 +5,7 @@
   POST /api/chat     {"query":..,"user":..,"conversation_id":..(可选),"context_id":..(可选)}
   GET  /health
 """
-import base64, json, os, secrets, threading, time, unicodedata, urllib.error, urllib.request, http.server, socketserver
+import base64, hashlib, json, os, secrets, threading, time, unicodedata, urllib.error, urllib.request, http.server, socketserver
 
 DIFY_KEY = os.environ.get("DIFY_KEY") or open("/opt/dify.key").read().strip()
 DIFY = "http://127.0.0.1/v1/chat-messages"   # Dify 就在本机
@@ -384,6 +384,24 @@ def _tongue_specific_advice(details, profile):
     return advice[:3]
 
 
+def _answer_variant(image_b64):
+    return hashlib.sha256(image_b64.encode()).digest()
+
+
+def _rotate(values, offset):
+    return values[offset % len(values):] + values[:offset % len(values)] if values else values
+
+
+TONGUE_FOLLOWUPS = (
+    "最近睡眠和白天精力有什么变化？",
+    "最近食欲和饭后感受怎么样？",
+    "最近排便频率和形态有没有变化？",
+    "平时更怕冷，还是更容易口干、燥热？",
+    "最近一周有没有熬夜、饮酒或连续吃辛辣油腻食物？",
+    "近期体重、活动量和晨起状态有什么变化？",
+)
+
+
 def _product_details(names):
     found = []
     for wanted in names:
@@ -594,10 +612,11 @@ def chat_with_image_context(query, user, token):
 
 
 def _tongue_answer(observation, body_type, secondary_type, match_strength,
-                   profile, details, products):
-    advice = "\n".join(
-        f"{i}. {text}" for i, text in enumerate(_tongue_specific_advice(details, profile), 1))
-    findings = "；".join(_tongue_key_findings(details))
+                   profile, details, products, variant=b"\0\0\0"):
+    advice_items = _rotate(_tongue_specific_advice(details, profile), variant[1])
+    advice = "\n".join(f"{i}. {text}" for i, text in enumerate(advice_items, 1))
+    findings = "；".join(_rotate(_tongue_key_findings(details), variant[0]))
+    followup = TONGUE_FOLLOWUPS[variant[2] % len(TONGUE_FOLLOWUPS)]
     detail_text = "\n".join(f"- {label}：{details[key]}" for key, label in TONGUE_FIELDS)
     product_text = _product_block(products) or "当前图片信息不足，本次不展示候选产品；请补充个人基本情况后再评估。"
     return f"""**初步舌象**
@@ -624,7 +643,8 @@ def _tongue_answer(observation, body_type, secondary_type, match_strength,
 {advice}
 
 **下一步**
-下一条请同时写上“本次初步倾向：{body_type}”，并补充睡眠、食欲、排便、怕冷或燥热，以及个人基本情况、慢病、过敏和正在用药情况；也可以上传体测报告。
+请先回答一个最关键的问题：**{followup}**
+下一条同时写上“本次初步倾向：{body_type}”；也可以上传体测报告。
 
 **推荐产品**
 以下只按当前体质倾向展示候选搭配，不代表已经确认适合食用。单张舌照不足以决定是否适合食用；完成体测、过敏、基础病、用药和其他特殊情况核对前，请勿据此开始食用：
@@ -635,22 +655,32 @@ def _tongue_answer(observation, body_type, secondary_type, match_strength,
 本结果仅根据当前图片中的可见舌体、舌苔特征生成，用于健康信息参考，不构成疾病诊断、医疗建议或处方，不能替代医生结合病史、望闻问切及必要检查作出的判断。请勿仅凭本结果开始、停用或调整药物、中成药或保健品。不适持续或加重请及时就医；出现胸痛、呼吸困难、昏迷或抽搐等急症请立即拨打120。"""
 
 
-def _unclear_tongue_answer(observation, details, quality_issues):
+def _unclear_tongue_answer(observation, details, quality_issues,
+                           body_type="", secondary_type="", variant=b"\0\0\0"):
     detail_text = "\n".join(f"- {label}：{details[key]}" for key, label in TONGUE_FIELDS)
     issue_text = "、".join(quality_issues) or "当前可见特征不足以稳定分类"
+    findings = "；".join(_rotate(_tongue_key_findings(details), variant[0]))
+    tendency = (f"图片质量受限，但当前可见部分更接近**{body_type}**，"
+                f"次倾向为**{secondary_type}**；只作为弱倾向继续核对。"
+                if body_type else "当前没有足够的可见特征支持体质倾向。")
+    followup = TONGUE_FOLLOWUPS[variant[2] % len(TONGUE_FOLLOWUPS)]
     return f"""**当前能看见的舌象**
 {observation or "已识别到舌体，但细节不足。"}
+
+**仍可辨认的重点**
+{findings or "当前照片没有稳定可辨认的舌象重点。"}
 
 **舌象细节**
 {detail_text}
 
-**为什么暂不分类**
-{issue_text}。为避免误判，本次不强行归入某一体质。
+**弱倾向**
+{tendency}
 
 **建议重拍**
-请在自然光下正对镜头，关闭美颜和滤镜，舌头自然平伸，保证舌尖、舌中和两侧边缘都清晰入镜。
+{issue_text}。请在自然光下正对镜头，关闭美颜和滤镜，舌头自然平伸，保证舌尖、舌中和两侧边缘都清晰入镜。
 
 **需要继续核对**
+请先回答：**{followup}**
 {TONGUE_CHECK_GUIDANCE}。
 
 **推荐产品**
@@ -763,6 +793,7 @@ def analyze_image(image_b64, user=""):
         raw_details = r.get("tongue_details")
         usable_details = _usable_tongue_detail_count(raw_details)
         details = _tongue_details(raw_details)
+        variant = _answer_variant(image_b64)
         observation = _neutral_generated_text(r.get("observation"), 300)
         raw_issues = r.get("quality_issues")
         issues = [_neutral_generated_text(x, 80) for x in raw_issues[:8]
@@ -782,12 +813,22 @@ def analyze_image(image_b64, user=""):
                 issues = ["可稳定辨认的舌象细节不足"]
         if not bt:
             no_match = t == "tongue"
+            weak_type, weak_secondary, weak_scores = _body_type_ranking(raw_details)
+            has_weak_type = weak_scores[weak_type] > 0
             answer = (_no_match_tongue_answer(observation, details) if no_match
-                      else _unclear_tongue_answer(observation, details, issues))
-            body_type = NO_MATCH_BODY_TYPE if no_match else "图片信息不足，暂无法判定"
+                      else _unclear_tongue_answer(
+                          observation, details, issues,
+                          weak_type if has_weak_type else "",
+                          weak_secondary if has_weak_type else "", variant))
+            body_type = (NO_MATCH_BODY_TYPE if no_match else
+                         (weak_type if has_weak_type else "图片信息不足，暂无法判定"))
             return {"is_tongue": True, "analysis_status": "no_typical_match" if no_match else "image_unclear",
                     "image_source": source,
                     "observation": observation, "body_type": body_type,
+                    "secondary_body_type": weak_secondary if has_weak_type else "",
+                    "match_strength": "较弱（图片质量受限）" if has_weak_type else "",
+                    "match_score": weak_scores[weak_type] if has_weak_type else 0,
+                    "key_findings": _tongue_key_findings(details),
                     "tongue_details": details, "quality_issues": issues,
                     "symptoms": [], "products": [], "product_details": [],
                     "check_guidance": TONGUE_CHECK_GUIDANCE,
@@ -801,7 +842,7 @@ def analyze_image(image_b64, user=""):
         product_keys = m["products"] if score >= 6 else []
         products = _product_details(product_keys)
         answer = _tongue_answer(
-            observation, bt, secondary_type, match_strength, m, details, products)
+            observation, bt, secondary_type, match_strength, m, details, products, variant)
         return {"is_tongue": True, "analysis_status": "matched",
                 "image_source": source,
                 "observation": observation, "body_type": bt,

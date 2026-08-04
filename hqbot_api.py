@@ -908,7 +908,20 @@ def _dify(body):
     return json.load(urllib.request.urlopen(req, timeout=120))
 
 
+def _quick_reply(query):
+    q = _short(query, 80).strip().rstrip("。！？!? ").casefold()
+    if q in ("你好", "您好", "在吗", "哈喽", "hello", "hi"):
+        return "你好！我是东晟时代 AI 健康管家，可以帮你解读体测数据、分析舌象，以及回答体重管理问题。"
+    if q in ("你是谁", "你能做什么", "有什么功能"):
+        return ("我是东晟时代 AI 健康管家。我能解读体测报告、观察舌象可见特征，"
+                "并根据你补充的情况给出日常管理建议。我不做疾病诊断，也不代替医生。")
+    return ""
+
+
 def chat(query, user, conv):
+    quick = _quick_reply(query)
+    if quick:
+        return {"answer": quick, "conversation_id": conv, "fast_path": True}
     body = {"inputs": {}, "query": query, "response_mode": "blocking", "user": user or "h5user"}
     if conv:
         body["conversation_id"] = conv
@@ -920,18 +933,23 @@ def chat(query, user, conv):
         # ponytail: old Dify conversations pin the dead GLM config; start fresh instead of rewriting 190 DB rows.
         body.pop("conversation_id")
         d = _dify(body)
-    return {"answer": d.get("answer", ""), "conversation_id": d.get("conversation_id", "")}
+    return {"answer": d.get("answer", ""), "conversation_id": d.get("conversation_id", ""),
+            "fast_path": False}
 
 
 class H(http.server.BaseHTTPRequestHandler):
     def _send(self, obj, code=200):
         b = json.dumps(obj, ensure_ascii=False).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.end_headers()
-        self.wfile.write(b)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.end_headers()
+            self.wfile.write(b)
+            return True
+        except (BrokenPipeError, ConnectionResetError):
+            return False
 
     def do_OPTIONS(self):
         self._send({"ok": True})
@@ -958,6 +976,8 @@ class H(http.server.BaseHTTPRequestHandler):
                                     "context_expires_in": IMAGE_CONTEXT_TTL})
                 self._send(payload)
             elif self.path == "/api/chat":
+                import time as _t
+                t0 = _t.time()
                 context_id = data.get("context_id", "")
                 if context_id:
                     try:
@@ -971,6 +991,8 @@ class H(http.server.BaseHTTPRequestHandler):
                 else:
                     result = chat(data.get("query", ""), data.get("user", ""),
                                   data.get("conversation_id", ""))
+                mode = "context" if context_id else ("fast" if result.get("fast_path") else "dify")
+                print(f"[chat] mode={mode} {_t.time()-t0:.1f}s", flush=True)
                 self._send({"ok": True, **result})
             else:
                 self._send({"ok": False, "error": "not found"}, 404)

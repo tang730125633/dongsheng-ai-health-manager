@@ -11,6 +11,7 @@
   .phone{position:relative;width:100%;height:100vh;height:100dvh;margin:0 auto;overflow:hidden;background:#000;display:flex;flex-direction:column}
   .bg{position:absolute;inset:0;background:url('./page-background.png') center/cover no-repeat;z-index:0}
   .statusbar{position:relative;height:calc(12px + env(safe-area-inset-top));z-index:4;flex:none}
+  .new-chat{position:absolute;right:20px;top:calc(14px + env(safe-area-inset-top));z-index:6;border:0;border-radius:16px;padding:7px 12px;background:rgba(255,255,255,.9);color:var(--deep);font-size:13px}
   .scroll{position:relative;flex:1;overflow-y:auto;z-index:2;display:flex;flex-direction:column;padding:0 20px 10px}
   .scroll::-webkit-scrollbar{display:none}
   .hero{position:relative;flex:none;min-height:400px}
@@ -40,6 +41,7 @@
 <div class="phone">
   <div class="bg"></div>
   <div class="statusbar"></div>
+  <button class="new-chat" id="newChat" type="button">新对话</button>
   <div class="scroll" id="scroll">
     <div class="hero" id="hero">
       <img class="char" src="./ai-health-manager.png" alt="AI健康管家">
@@ -67,10 +69,22 @@ const msgs = document.getElementById('msgs');
 const scroll = document.getElementById('scroll');
 const q = document.getElementById('q');
 const fileInput = document.getElementById('file');
-const userId = 'h5-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
-let convId = "";
+const SESSION_KEY = 'hq-health-session-v1';
+function loadSession(){
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || '{}'); }
+  catch (e) { return {}; }
+}
+const session = loadSession();
+const userId = session.userId || ('h5-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12));
+let convId = session.convId || "";
 let pendingContextId = "";
 let busy = false;
+
+function saveSession(){
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({userId:userId, convId:convId})); }
+  catch (e) {}
+}
+saveSession();
 
 function mdToHtml(value){
   let text = String(value == null ? '' : value);
@@ -135,6 +149,7 @@ async function send(){
       aiBubble.innerHTML = mdToHtml(data.answer || '（无回复）');
       if(data.context_consumed) pendingContextId = "";
       convId = data.reset_conversation ? "" : (data.conversation_id || convId);
+      saveSession();
     }
   }catch(e){
     aiBubble.textContent = '网络出错了，请重试';
@@ -173,6 +188,14 @@ async function imageBase64(file){
 }
 
 q.addEventListener('keydown', event=>{ if(event.key === 'Enter') send(); });
+document.getElementById('newChat').addEventListener('click', ()=>{
+  if(busy) return;
+  convId = "";
+  pendingContextId = "";
+  msgs.textContent = "";
+  saveSession();
+  q.focus();
+});
 document.getElementById('tongue').addEventListener('click', ()=>fileInput.click());
 fileInput.addEventListener('change', async ()=>{
   const file = fileInput.files[0];

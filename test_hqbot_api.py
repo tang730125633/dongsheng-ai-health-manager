@@ -11,6 +11,9 @@ os.environ.setdefault("OPENAI_BASE", "https://example.com/openai/v1")
 import hqbot_api as h
 
 assert h.OPENAI == "https://example.com/openai/v1/chat/completions"
+assert "AI 健康管家" in h._quick_reply("你好！")
+assert "不代替医生" in h._quick_reply("你能做什么？")
+assert h._quick_reply("气血不足怎么办") == ""
 assert "不做体质分类" in h.UNIFIED_SYS
 assert "即使带有手机状态栏、返回键或页面按钮，也仍按report处理" in h.UNIFIED_SYS
 assert "页面中即使有很大的舌照，也必须标为screenshot并归为other" in h.UNIFIED_SYS
@@ -522,9 +525,12 @@ def fake_dify(body):
     return {"answer": "ok", "conversation_id": "new"}
 
 h._dify = fake_dify
-assert h.chat("hi", "test", "old") == {"answer": "ok", "conversation_id": "new"}
+fast = h.chat("hi", "test", "old")
+assert fast["fast_path"] and fast["conversation_id"] == "old" and not calls
+assert h.chat("继续之前的问题", "test", "old") == {
+    "answer": "ok", "conversation_id": "new", "fast_path": False}
 assert calls == [
-    {"inputs": {}, "query": "hi", "response_mode": "blocking", "user": "test", "conversation_id": "old"},
-    {"inputs": {}, "query": "hi", "response_mode": "blocking", "user": "test"},
+    {"inputs": {}, "query": "继续之前的问题", "response_mode": "blocking", "user": "test", "conversation_id": "old"},
+    {"inputs": {}, "query": "继续之前的问题", "response_mode": "blocking", "user": "test"},
 ]
 print("ok")

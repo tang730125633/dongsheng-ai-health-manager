@@ -5,7 +5,7 @@
   POST /api/chat     {"query":..,"user":..,"conversation_id":..(可选),"context_id":..(可选)}
   GET  /health
 """
-import base64, hashlib, json, os, secrets, threading, time, unicodedata, urllib.error, urllib.request, http.server, socketserver
+import base64, hashlib, json, os, re, secrets, threading, time, unicodedata, urllib.error, urllib.request, http.server, socketserver
 
 DIFY_KEY = os.environ.get("DIFY_KEY")
 if not DIFY_KEY and os.path.exists("/opt/dify.key"):
@@ -85,7 +85,7 @@ PRODUCT_CATALOG = {
     },
     "氣恤寶": {
         "name": "润美人®【氣恤寶】红石榴胶原三肽植物饮品",
-        "aliases": ("气恤宝",),
+        "aliases": ("气恤宝", "恤宝"),
         "ingredients": ("红石榴胶原三肽", "黄芪", "当归", "大枣", "红参"),
         "benefit": "补充胶原相关成分及手册所列食养原料，用于日常营养与皮肤状态管理",
         "selling_point": "兼顾胶原相关营养和传统食养原料，适合关注气色与皮肤状态的人群",
@@ -125,6 +125,9 @@ TEXT_SYSTEM = """你是独立小程序“AI健康管家”的健康与体重管�
 不能自行给产品、药物或保健品的具体剂量。涉及孕哺、儿童、过敏、慢病或正在用药时，先建议核对包装并咨询医生或药师。
 舌照只能描述可见特征，不能单凭舌象诊断疾病或确认体质。胸痛、呼吸困难、昏迷或抽搐时应立即拨打120。
 如果资料不足就明确说明，不编造产品、价格、成分或功效。
+“东晟时代是什么公司/是干嘛的”等同义问法必须一致回答为专注健康与营养产品和健康管理服务的企业；不得回答“不知道”。
+不要把单一表现直接解释为湿气重、脾胃虚弱、消化不良或某种体质；不要把“不油腻”等单一特征直接判断为健康或异常。
+不得暗示产品多用一段时间就会出现明显效果。用户体重达到200斤但未提供身高、关节和心血管情况时，先补充筛查，不直接安排统一运动量。
 受控产品资料：
 """ + "\n".join(
     f"- {item['name']}：主要成分{', '.join(item['ingredients'])}；方向：{item['benefit']}"
@@ -1009,6 +1012,97 @@ def _safe_text_fallback(query):
             "再根据持续变化逐项调整。涉及明显不适、慢病、用药或特殊人群时，请先咨询医生或药师。")
 
 
+def _catalog_answer(query):
+    q = _compact_text(query)
+    if "东晟时代" in q and any(term in q for term in ("什么公司", "是干嘛", "做什么")):
+        return ("东晟时代是一家专注健康与营养领域的企业，提供营养补充产品和健康管理相关服务。"
+                "本助手只依据企业提供并已录入的资料介绍产品，不代表医疗机构。")
+    asks_catalog = "产品" in q and any(term in q for term in ("哪些", "所有", "几款", "一共", "有什么"))
+    if not asks_catalog:
+        return ""
+    names = "\n".join(f"{i}. {product['name']}" for i, product in enumerate(PRODUCT_CATALOG.values(), 1))
+    price = ("\n\n当前没有经过核验的统一价格、规格、优惠或库存资料，不能确认“399元两盒”等说法；"
+             "请以产品顾问提供的当期正式信息为准。") if any(term in q for term in ("价格", "多少钱", "399")) else ""
+    return f"东晟时代当前录入本助手的口服产品共9款：\n\n{names}{price}"
+
+
+def _matched_product(query):
+    q = _compact_text(query)
+    matches = []
+    for key, product in PRODUCT_CATALOG.items():
+        names = (key, product["name"], *product["aliases"])
+        if any(_compact_text(name) in q for name in names):
+            matches.append((key, product))
+    return matches[0] if len(matches) == 1 else None
+
+
+def _controlled_product_answer(query):
+    match = _matched_product(query)
+    if not match:
+        return ""
+    _, product = match
+    q = _compact_text(query)
+    if any(term in q for term in ("尖刀爆品", "爆品", "销量", "广泛认可")):
+        return (f"现有受控资料只能确认{product['name']}的配方和日常营养方向，不能证明它的销量、市场认可度或“尖刀爆品”称号。\n\n"
+                f"可以准确介绍为：主要成分包括{'、'.join(product['ingredients'])}；{product['benefit']}。\n\n{PRODUCT_NOTICE}")
+    if any(term in q for term in ("多少钱", "价格", "规格")):
+        return (f"{product['name']}已录入的主要成分为{'、'.join(product['ingredients'])}，方向是{product['benefit']}。"
+                "当前没有经过核验的价格、规格、优惠或库存信息，请联系产品顾问确认当期正式资料。\n\n" + PRODUCT_NOTICE)
+    if any(term in q for term in ("话术", "推荐给顾客", "怎么推荐")):
+        return (f"可以这样介绍：如果您正在关注{product['selling_point']}，可以了解一下{product['name']}。"
+                f"它主要含{'、'.join(product['ingredients'])}，{product['benefit']}。"
+                "是否适合仍要先核对过敏、慢病和用药情况，不能把它当作治疗方案或保证效果。"
+                "确认这些信息后，可联系产品顾问了解购买方式。")
+    return (f"**{product['name']}**\n\n"
+            f"- 适合了解的人群：{product['selling_point']}。\n"
+            f"- 日常营养方向：{product['benefit']}\n"
+            f"- 主要成分：{'、'.join(product['ingredients'])}\n\n"
+            f"{PRODUCT_NOTICE}\n\n确认与你的过敏、慢病和用药不冲突后，可联系产品顾问核对详情和购买方式。")
+
+
+def _contextless_answer(query, has_history):
+    if has_history:
+        return ""
+    q = _compact_text(query)
+    if any(term in q for term in ("刚才", "以上产品", "第二项", "第一项", "第1款", "第2款",
+                                  "那产品", "你给我的方案", "太简单了", "具体一点")):
+        return ("当前是新会话，我看不到你所指的上一条内容。请把产品名称、主要目标、原问题或上一条回答贴过来，"
+                "并补充过敏、慢病和正在用药情况，我再准确接着回答。")
+    if q in ("搭配产品", "搭配产品。", "可以吃什么产品", "可以吃什么产品？", "怎么吃", "怎么吃？"):
+        return ("先告诉我你的主要目标，以及年龄、过敏、慢病、正在用药和孕哺情况。"
+                "没有这些信息，我不会直接替你搭配或安排吃法；补充后我可以从现有9款产品中缩小选择。")
+    return ""
+
+
+def _high_risk_weight_answer(query):
+    q = _compact_text(query)
+    weights = [int(value) for value in re.findall(r"(\d{3})斤", q)]
+    if not weights or max(weights) < 200 or not any(term in q for term in ("减肥", "减重", "体重")):
+        return ""
+    return ("先别直接套统一减重方案。请补充身高、年龄、血压、是否有心血管或关节问题、目前活动能力和正在用药。"
+            "在这些信息明确前，先记录3天饮食和睡眠，减少含糖饮料与夜宵；活动从不引起胸闷、头晕或关节痛的低强度步行开始。"
+            "如果活动时胸痛、明显气短或头晕，应停止并及时就医。完成风险核对后，我再给你制定方案并匹配产品。")
+
+
+def _health_boundary_answer(query):
+    q = _compact_text(query)
+    if "齿痕" in q and any(term in q for term in ("原因", "体质", "推荐")):
+        return ("齿痕、舌体偏胖或舌苔较厚可能受拍摄角度、口腔状态、饮食和其他因素影响，"
+                "不能仅凭文字直接判断“湿气重”“脾胃虚弱”或某种体质。可以上传自然光、无滤镜的原始舌照，"
+                "并补充食欲、排便、睡眠、精力、过敏、慢病和用药情况；信息不足时不直接搭配产品。")
+    if "气血不足" in q:
+        return ("“气血不足”不能只凭疲劳或气色自行确认。若有持续乏力、头晕、心悸、气短或面色明显苍白，"
+                "建议先就医排查贫血等原因，不要靠产品替代检查。若你只是关注日常气色与皮肤营养，"
+                "可以了解润美人®【氣恤寶】红石榴胶原三肽植物饮品；它用于日常营养与皮肤状态管理，不治疗贫血或其他疾病。\n\n"
+                + PRODUCT_NOTICE)
+    if "一次体验" in q and any(term in q for term in ("效果", "不明显")):
+        return ("一次体验不明显不能据此保证以后一定有效，也不建议自行加量或叠加产品。"
+                "请先说明具体产品、使用方式、开始时间和目标，再依据包装说明与产品顾问核对；身体不适时停止并咨询医生或药师。")
+    if q in ("面部不油腻", "面部不油腻。"):
+        return "面部不油腻本身不能直接等同于皮肤一定健康或异常。你可以补充是否有干燥、发红、刺痛、脱屑或其他具体困扰。"
+    return ""
+
+
 def _text_product_recommendation(query):
     q = _compact_text(query)
     if any(term in q for term in ("胸痛", "呼吸困难", "昏迷", "抽搐", "怀孕", "孕期", "哺乳",
@@ -1018,18 +1112,24 @@ def _text_product_recommendation(query):
     if "过敏" in q and "食用真菌过敏" not in q:
         return ""
     note, keys = "", []
-    if any(term in q for term in ("痛经", "经期", "小腹发凉")):
+    has_weight_goal = any(term in q for term in ("平台期", "运动", "体重管理", "控制体重", "减重", "减肥",
+                                                       "肥胖", "喝凉水都胖", "腰腹", "囤积"))
+    has_bowel_goal = any(term in q for term in ("便秘", "排便困难", "排便不规律", "膳食纤维", "大便黏",
+                                                      "大便粘", "黏马桶", "粘马桶", "两天一次", "不是天天大便"))
+    if has_weight_goal and has_bowel_goal:
+        keys = ["果燃畅通", "左旋肉碱绿茶控能片"]
+    elif any(term in q for term in ("痛经", "经期", "小腹发凉")):
         if "食用真菌过敏" in q:
             note = ("**已排除：润美人®【經舒寶】**——资料含蛹虫草，与你提供的食用真菌过敏信息冲突，"
                     "本次不推荐。\n\n")
             keys = ["双花燕窝阿胶姜桂膏"]
         else:
             keys = ["經舒寶", "双花燕窝阿胶姜桂膏"]
-    elif any(term in q for term in ("便秘", "排便困难", "排便不规律", "膳食纤维")):
+    elif has_bowel_goal:
         keys = ["果燃畅通", "颐纤芋芸益生菌"]
-    elif any(term in q for term in ("肚子胀", "腹胀", "消化", "肠道", "菌群")):
+    elif any(term in q for term in ("肚子胀", "腹胀", "胀气", "消化", "肠道", "菌群")):
         keys = ["颐纤芋芸益生菌", "果燃畅通"]
-    elif any(term in q for term in ("平台期", "运动", "体重管理", "控制体重", "减重", "减肥")):
+    elif has_weight_goal:
         keys = ["左旋肉碱绿茶控能片", "青稞匀浆膳"]
     elif any(term in q for term in ("早餐", "三餐不规律", "代餐", "蛋白质", "营养不均衡")):
         keys = ["青稞匀浆膳"]
@@ -1037,7 +1137,7 @@ def _text_product_recommendation(query):
         keys = ["五指毛桃茯苓营养膏", "果燃畅通"]
     elif any(term in q for term in ("皮肤", "胶原", "抗氧化", "暗沉", "干燥", "松弛")):
         keys = ["颜润堂PQQ", "氣恤寶"]
-    elif any(term in q for term in ("气血", "气色", "面色", "疲劳", "乏力")):
+    elif any(term in q for term in ("气血", "气色", "面色")):
         keys = ["氣恤寶", "颜润堂PQQ"]
     details = _product_details(keys[:2])
     if not details:
@@ -1054,14 +1154,16 @@ def _text_product_recommendation(query):
     return "**根据你的问题，为你匹配的产品**\n" + note + cards + "\n\n" + PRODUCT_NOTICE + "\n\n" + cta
 
 
-def _quick_reply(query):
+def _quick_reply(query, has_history=False):
     q = _short(query, 80).strip().rstrip("。！？!? ").casefold()
     if q in ("你好", "您好", "在吗", "哈喽", "hello", "hi"):
         return "你好！我是东晟时代 AI 健康管家，可以帮你解读体测数据、分析舌象，以及回答体重管理问题。"
     if q in ("你是谁", "你能做什么", "有什么功能") or "能提供哪些帮助" in q:
         return ("我是东晟时代 AI 健康管家。我能解读体测报告、观察舌象可见特征，"
                 "并根据你补充的情况给出日常管理建议。我不做疾病诊断，也不代替医生。")
-    return ""
+    return (_catalog_answer(query) or _controlled_product_answer(query)
+            or _contextless_answer(query, has_history) or _high_risk_weight_answer(query)
+            or _health_boundary_answer(query))
 
 
 def chat(query, user, conv):
@@ -1070,13 +1172,14 @@ def chat(query, user, conv):
     if not query:
         return {"answer": "请告诉我你想了解的健康或体重管理问题。", "conversation_id": conv,
                 "fast_path": True, "mode": "fast"}
-    quick = _quick_reply(query)
+    history = _conversation_history(conv)
+    quick = _quick_reply(query, bool(history))
     if quick:
         _remember_text_turn(conv, query, quick)
         return {"answer": quick, "conversation_id": conv, "fast_path": True, "mode": "fast"}
     if CHAT_BACKEND != "dify":
         messages = [{"role": "system", "content": TEXT_SYSTEM},
-                    *_conversation_history(conv), {"role": "user", "content": query}]
+                    *history, {"role": "user", "content": query}]
         try:
             answer = _text_model(messages)
             if not answer:

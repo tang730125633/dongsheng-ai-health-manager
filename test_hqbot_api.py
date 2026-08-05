@@ -14,7 +14,7 @@ assert h.OPENAI == "https://example.com/openai/v1/chat/completions"
 assert "不属于黄雀产品" in h.TEXT_SYSTEM
 assert "AI 健康管家" in h._quick_reply("你好！")
 assert "不代替医生" in h._quick_reply("你能做什么？")
-assert h._quick_reply("气血不足怎么办") == ""
+assert "不能只凭" in h._quick_reply("气血不足怎么办")
 assert "不做体质分类" in h.UNIFIED_SYS
 assert "即使带有手机状态栏、返回键或页面按钮，也仍按report处理" in h.UNIFIED_SYS
 assert "页面中即使有很大的舌照，也必须标为screenshot并归为other" in h.UNIFIED_SYS
@@ -591,6 +591,37 @@ for problem, product_name in problem_cases.items():
 assert all(product["name"] in coverage_text for product in h.PRODUCT_CATALOG.values())
 assert not h._text_product_recommendation("我有高血压，想减肥")
 assert not h._text_product_recommendation("我对一种配料过敏，想改善肠道")
+
+# 历史问题共同根因：事实同义问法、无上下文幻觉、医疗边界和产品承接必须确定。
+company_a = h.chat("东晟时代是什么公司？", "test", "")
+company_b = h.chat("东晟时代是干嘛的？", "test", "")
+assert "健康与营养" in company_a["answer"] and "健康与营养" in company_b["answer"]
+for question in ("你们有哪些产品？", "东晟时代有哪些产品？", "东晟时代所有口服产品有哪些？"):
+    catalog = h.chat(question, "test", "")["answer"]
+    assert "共9款" in catalog and all(product["name"] in catalog for product in h.PRODUCT_CATALOG.values())
+market = h.chat("为什么说果燃畅通是尖刀爆品？", "test", "")["answer"]
+assert "不能证明" in market and "广泛关注和认可" not in market
+sales_copy = h.chat("给我一段推荐果燃畅通给顾客的话术。", "test", "")["answer"]
+assert "购买方式" in sales_copy and "不能把它当作治疗方案或保证效果" in sales_copy
+assert all(term not in sales_copy for term in ("有效支持", "改善肠道功能"))
+for question in ("搭配产品。", "可以吃什么产品？", "那产品我怎么搭配吃？"):
+    reply = h.chat(question, "test", "")["answer"]
+    assert "过敏" in reply and "正在用药" in reply and "主要目标" in reply
+no_context = h.chat("你刚才提到的第二项是什么？只回复名称。", "test", "")["answer"]
+assert "新会话" in no_context and "果燃畅通" not in no_context
+assert "不能仅凭" in h.chat("胖大齿痕舌是什么原因？", "test", "")["answer"]
+assert "不能据此保证" in h.chat("为什么一次体验效果不是特别明显？", "test", "")["answer"]
+heavy = h.chat("我体重220斤，有没有好的方式减肥？", "test", "")["answer"]
+assert "补充身高" in heavy and "关节" in heavy and "150分钟" not in heavy
+fatigue = h.chat("偏结实、容易疲劳、怕热，是什么情况？", "test", "")["answer"]
+assert "氣恤寶" not in fatigue and "PQQ" not in fatigue
+for question, product in {
+    "我是肥胖体质，应该吃什么产品？": "左旋肉碱绿茶控能片",
+    "我喝凉水都胖，推荐什么产品？": "左旋肉碱绿茶控能片",
+    "大便黏马桶是什么问题？": "果燃畅通膳食纤维果肽饮",
+    "饭后容易胀气怎么办？": "必颜堂·颐纤芋芸益生菌固体饮料",
+}.items():
+    assert product in h.chat(question, "test", "")["answer"]
 
 h._text_model = lambda messages: (
     "可以先规律作息。\n\n含胶原蛋白肽的产品有助于提升皮肤弹性。\n\n"

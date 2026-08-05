@@ -555,11 +555,11 @@ def fake_text_model(messages):
 h.CHAT_BACKEND = "direct"
 h._text_model = fake_text_model
 h._TEXT_CONVERSATIONS.clear()
-first = h.chat("BMI 是什么？", "test", "")
+first = h.chat("如何记录每天的饮食？", "test", "")
 assert first["mode"] == "direct" and first["conversation_id"]
 second = h.chat("我刚才问了什么？", "test", first["conversation_id"])
 assert second["answer"] == "第二轮回答"
-assert any(message.get("content") == "BMI 是什么？" for message in model_calls[1])
+assert any(message.get("content") == "如何记录每天的饮食？" for message in model_calls[1])
 
 allergy_product = h.chat("我对食用真菌过敏，经常痛经", "test", "")
 assert "已排除：润美人®【經舒寶】" in allergy_product["answer"]
@@ -622,6 +622,17 @@ for question, product in {
     "饭后容易胀气怎么办？": "必颜堂·颐纤芋芸益生菌固体饮料",
 }.items():
     assert product in h.chat(question, "test", "")["answer"]
+assert "上传按钮" in h.chat("舌诊怎么看，是拍图片给你吗？", "test", "")["answer"]
+assert "上传按钮" in h.chat("在哪里解读和分析体检报告？", "test", "")["answer"]
+missing_image = h.chat("请分析一下上图数据。", "test", "")["answer"]
+assert "没有收到" in missing_image and "无法查看" not in missing_image
+legacy = h.chat("婷嗖是什么？多少钱？", "test", "")["answer"]
+assert "没有“婷嗖”" in legacy and "不能确认" in legacy
+bmi = h.chat("我身高165、体重128斤，超重了吗？多少斤比较合适？", "test", "")["answer"]
+assert "BMI约为23.5" in bmi and "101–130斤" in bmi and "理想体重" in bmi
+assert "不能仅凭这一点" in h.chat("大便是正常的。", "test", "")["answer"]
+nose = h.chat("鼻腔里感觉有异物，是哪里有问题？", "test", "")["answer"]
+assert "不要用棉签" in nose and "耳鼻喉科" in nose
 
 h._text_model = lambda messages: (
     "可以先规律作息。\n\n含胶原蛋白肽的产品有助于提升皮肤弹性。\n\n"

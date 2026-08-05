@@ -128,6 +128,7 @@ TEXT_SYSTEM = """你是独立小程序“AI健康管家”的健康与体重管�
 “东晟时代是什么公司/是干嘛的”等同义问法必须一致回答为专注健康与营养产品和健康管理服务的企业；不得回答“不知道”。
 不要把单一表现直接解释为湿气重、脾胃虚弱、消化不良或某种体质；不要把“不油腻”等单一特征直接判断为健康或异常。
 不得暗示产品多用一段时间就会出现明显效果。用户体重达到200斤但未提供身高、关节和心血管情况时，先补充筛查，不直接安排统一运动量。
+作息建议应按用户实际起床和就寝时间逐步调整，不强制所有人在固定钟点吃饭或睡觉。
 受控产品资料：
 """ + "\n".join(
     f"- {item['name']}：主要成分{', '.join(item['ingredients'])}；方向：{item['benefit']}"
@@ -1100,7 +1101,62 @@ def _health_boundary_answer(query):
                 "请先说明具体产品、使用方式、开始时间和目标，再依据包装说明与产品顾问核对；身体不适时停止并咨询医生或药师。")
     if q in ("面部不油腻", "面部不油腻。"):
         return "面部不油腻本身不能直接等同于皮肤一定健康或异常。你可以补充是否有干燥、发红、刺痛、脱屑或其他具体困扰。"
+    if q in ("大便是正常的", "大便是正常的。"):
+        return "排便形态和频率近期稳定是有用的信息，但不能仅凭这一点判断整个消化系统都正常。若没有腹痛、便血或持续变化，可继续保持饮食、饮水和活动习惯。"
+    if "鼻腔" in q and "异物" in q:
+        return ("先不要用棉签或工具向里掏。如果确实可能进入异物，或出现单侧持续鼻塞、流血、恶臭分泌物、明显疼痛或呼吸受影响，"
+                "应尽快去耳鼻喉科；呼吸困难时立即急诊。没有真实异物时，这种感觉也可能来自干燥、炎症等情况，需要面诊确认。")
     return ""
+
+
+def _upload_help_answer(query):
+    q = _compact_text(query)
+    tongue_action = any(term in q for term in ("可以舌诊", "怎么做舌诊", "舌诊怎么看", "想做舌诊",
+                                                   "看看舌头", "做一下舌头"))
+    if tongue_action:
+        return ("可以。请点击输入框旁的图片上传按钮，上传一张自然光下、关闭美颜和滤镜、舌头自然平伸的原始照片，"
+                "让舌尖、舌中和两侧边缘清晰入镜。我会描述舌色、舌体、舌苔和润燥等可见特征；"
+                "舌照不能单独诊断疾病或确认体质，也不能替代医生。")
+    if "体检报告" in q and any(term in q for term in ("哪里", "解读", "分析")):
+        return ("可以直接在当前页面点击图片上传按钮，上传清晰、完整的体检报告图片；也可以粘贴关键指标和参考范围。"
+                "我会按报告原文解释指标并给出日常管理建议，但不代替医生结合病史作诊断。上传前请遮住姓名、身份证号等个人信息。")
+    if any(term in q for term in ("上图", "分析我的报告")):
+        return ("当前这条消息没有收到可分析的图片或报告。请点击图片上传按钮重新上传清晰完整的原图，"
+                "或把关键指标、数值、单位和参考范围粘贴出来；收到后我再分析，不会凭空猜测。")
+    return ""
+
+
+def _bmi_answer(query):
+    q = _compact_text(query).casefold()
+    if "bmi" in q and not re.search(r"\d", q):
+        return ("BMI 是体重（千克）除以身高（米）的平方，用于体重状况的初步筛查。"
+                "中国成年人通常以18.5–23.9为正常范围、24.0–27.9为超重、28.0及以上为肥胖；"
+                "它不能单独反映脂肪分布、肌肉量或疾病，儿童、孕期等人群需使用其他标准。")
+    if not any(term in q for term in ("超重", "多少斤比较合适", "bmi")):
+        return ""
+    height = re.search(r"(?:身高)?(\d{3})(?:厘米|cm)?", q)
+    weight = re.search(r"(?:体重)?(\d{2,3})斤", q)
+    if not height or not weight:
+        return ""
+    cm, jin = int(height.group(1)), int(weight.group(1))
+    if not 120 <= cm <= 220 or not 50 <= jin <= 500:
+        return "请重新核对身高和体重数值，我再帮你计算BMI。"
+    meters = cm / 100
+    bmi = jin / 2 / (meters * meters)
+    low_jin = 18.5 * meters * meters * 2
+    high_jin = 23.9 * meters * meters * 2
+    status = "偏低" if bmi < 18.5 else "正常范围" if bmi < 24 else "超重范围" if bmi < 28 else "肥胖范围"
+    return (f"按身高{cm}厘米、体重{jin}斤计算，BMI约为{bmi:.1f}，属于中国成年人筛查标准的{status}。"
+            f"对应BMI 18.5–23.9的体重约为{low_jin:.0f}–{high_jin:.0f}斤；这只是筛查范围，不是必须达到的“理想体重”，"
+            "还要结合腰围、肌肉量、病史和个人目标。")
+
+
+def _legacy_product_answer(query):
+    q = _compact_text(query)
+    if "婷嗖" not in q:
+        return ""
+    return ("当前受控产品目录的9款产品中没有“婷嗖”，因此我不能确认它是什么产品，也没有可核验的价格、规格或购买信息。"
+            "请提供包装正反面或正式产品资料，我再帮你核对；不要依据不明信息购买或食用。")
 
 
 def _text_product_recommendation(query):
@@ -1163,7 +1219,8 @@ def _quick_reply(query, has_history=False):
                 "并根据你补充的情况给出日常管理建议。我不做疾病诊断，也不代替医生。")
     return (_catalog_answer(query) or _controlled_product_answer(query)
             or _contextless_answer(query, has_history) or _high_risk_weight_answer(query)
-            or _health_boundary_answer(query))
+            or _health_boundary_answer(query) or _upload_help_answer(query)
+            or _bmi_answer(query) or _legacy_product_answer(query))
 
 
 def chat(query, user, conv):

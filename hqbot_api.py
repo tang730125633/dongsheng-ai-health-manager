@@ -1106,6 +1106,20 @@ def _health_boundary_answer(query):
     if "鼻腔" in q and "异物" in q:
         return ("先不要用棉签或工具向里掏。如果确实可能进入异物，或出现单侧持续鼻塞、流血、恶臭分泌物、明显疼痛或呼吸受影响，"
                 "应尽快去耳鼻喉科；呼吸困难时立即急诊。没有真实异物时，这种感觉也可能来自干燥、炎症等情况，需要面诊确认。")
+    if all(term in q for term in ("不吃早餐", "半夜吃", "凌晨2点")):
+        base = ("先逐步调整，不必强迫自己固定在某个钟点吃饭或立刻改到很早睡：\n\n"
+                "1. 本周先把入睡时间每2–3天提前15–30分钟，并固定起床时间。\n"
+                "2. 起床后1–2小时内安排一份含蛋白质和主食的简易早餐；如果暂时吃不下，从小份开始。\n"
+                "3. 把夜间最后一餐逐步提前到睡前约2–3小时；真饿时选择小份、低糖且不过油的食物。\n"
+                "4. 连续记录一周的进食、入睡和饥饿时间，再根据实际节奏调整。持续失眠、反酸或夜间暴食应咨询医生。")
+        recommendation = _text_product_recommendation(query)
+        return base + (("\n\n" + recommendation) if recommendation else "")
+    if "饭后" in q and "胀气" in q:
+        base = ("饭后胀气先从进食速度和触发食物排查：细嚼慢咽，少喝碳酸饮料，记录豆类、奶制品、洋葱等食物与症状的关系，"
+                "饭后可轻松散步。不要因为胀气就突然大量增加膳食纤维；纤维增加过快反而可能加重产气。"
+                "若持续两周以上，或伴随明显腹痛、呕吐、便血、体重下降，应就医。")
+        recommendation = _text_product_recommendation(query)
+        return base + (("\n\n" + recommendation) if recommendation else "")
     return ""
 
 
@@ -1132,7 +1146,7 @@ def _bmi_answer(query):
         return ("BMI 是体重（千克）除以身高（米）的平方，用于体重状况的初步筛查。"
                 "中国成年人通常以18.5–23.9为正常范围、24.0–27.9为超重、28.0及以上为肥胖；"
                 "它不能单独反映脂肪分布、肌肉量或疾病，儿童、孕期等人群需使用其他标准。")
-    if not any(term in q for term in ("超重", "多少斤比较合适", "bmi")):
+    if not any(term in q for term in ("超重", "多少斤比较合适", "bmi", "什么体质")):
         return ""
     height = re.search(r"(?:身高)?(\d{3})(?:厘米|cm)?", q)
     weight = re.search(r"(?:体重)?(\d{2,3})斤", q)
@@ -1146,9 +1160,16 @@ def _bmi_answer(query):
     low_jin = 18.5 * meters * meters * 2
     high_jin = 23.9 * meters * meters * 2
     status = "偏低" if bmi < 18.5 else "正常范围" if bmi < 24 else "超重范围" if bmi < 28 else "肥胖范围"
-    return (f"按身高{cm}厘米、体重{jin}斤计算，BMI约为{bmi:.1f}，属于中国成年人筛查标准的{status}。"
-            f"对应BMI 18.5–23.9的体重约为{low_jin:.0f}–{high_jin:.0f}斤；这只是筛查范围，不是必须达到的“理想体重”，"
-            "还要结合腰围、肌肉量、病史和个人目标。")
+    answer = (f"按身高{cm}厘米、体重{jin}斤计算，BMI约为{bmi:.1f}，属于中国成年人筛查标准的{status}。"
+              f"对应BMI 18.5–23.9的体重约为{low_jin:.0f}–{high_jin:.0f}斤；这只是筛查范围，不是必须达到的“理想体重”，"
+              "还要结合腰围、肌肉量、病史和个人目标。")
+    if "什么体质" in q:
+        answer += ("\n\n身高、体重和大便表现不能确认某种体质。大便黏马桶可先记录饮食、饮水、排便变化和伴随症状；"
+                   "减脂可从减少含糖饮料和夜宵、规律三餐、循序增加活动及保证睡眠开始。")
+        recommendation = _text_product_recommendation(query)
+        if recommendation:
+            answer += "\n\n" + recommendation
+    return answer
 
 
 def _legacy_product_answer(query):

@@ -633,6 +633,14 @@ assert "BMI约为23.5" in bmi and "101–130斤" in bmi and "理想体重" in bm
 assert "不能仅凭这一点" in h.chat("大便是正常的。", "test", "")["answer"]
 nose = h.chat("鼻腔里感觉有异物，是哪里有问题？", "test", "")["answer"]
 assert "不要用棉签" in nose and "耳鼻喉科" in nose
+combined = h.chat("我165、128斤，喝凉水都胖、大便黏马桶，是什么体质？给我一套减脂方案。", "test", "")["answer"]
+assert "BMI约为23.5" in combined and "不能确认某种体质" in combined
+assert "果燃畅通膳食纤维果肽饮" in combined and "左旋肉碱绿茶控能片" in combined
+schedule = h.chat("每天不吃早餐，晚上半夜吃东西，凌晨2点睡觉，该怎么办？", "test", "")["answer"]
+assert "不必强迫自己固定" in schedule and "睡前约2–3小时" in schedule and "青稞匀浆膳" in schedule
+bloating = h.chat("饭后容易胀气怎么办？", "test", "")["answer"]
+assert "增加过快反而可能加重产气" in bloating and "稀释胃酸" not in bloating
+assert "颐纤芋芸益生菌固体饮料" in bloating
 
 h._text_model = lambda messages: (
     "可以先规律作息。\n\n含胶原蛋白肽的产品有助于提升皮肤弹性。\n\n"

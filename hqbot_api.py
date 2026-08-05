@@ -99,7 +99,7 @@ PRODUCT_CATALOG = {
     "經舒寶": {
         "name": "润美人®【經舒寶】黄芪白芷γ-氨基丁酸植物饮品",
         "aliases": ("经舒宝",),
-        "ingredients": ("黄芪", "白芷", "GABA", "肉桂", "当归"),
+        "ingredients": ("黄芪", "白芷", "GABA", "肉桂", "当归", "蛹虫草"),
         "benefit": "含黄芪、白芷、GABA、肉桂和当归等手册所列原料，用于日常营养补充",
     },
 }
@@ -110,7 +110,7 @@ PRODUCT_NOTICE = ("主要成分与作用方向依据企业产品手册整理，�
                   "请勿仅凭本结果开始食用；相关人群食用前请先咨询医生或药师。")
 
 TEXT_SYSTEM = """你是独立小程序“AI健康管家”的健康与体重管理助手，不属于黄雀产品。
-用简洁、自然的中文回答。优先给低风险的饮食、活动、睡眠和记录建议，不主动推销产品。
+用简洁、自然的中文回答。优先给低风险的饮食、活动、睡眠和记录建议；不要在正文自行列具体产品，后端会按风险规则追加候选产品。
 你只能把下方产品资料当作企业手册中的成分与日常营养方向，不能声称治疗、保证有效、燃脂翻倍、必然通便或不反弹；
 不能自行给产品、药物或保健品的具体剂量。涉及孕哺、儿童、过敏、慢病或正在用药时，先建议核对包装并咨询医生或药师。
 舌照只能描述可见特征，不能单凭舌象诊断疾病或确认体质。胸痛、呼吸困难、昏迷或抽搐时应立即拨打120。
@@ -970,6 +970,9 @@ def _safe_text_fallback(query):
     q = _compact_text(query)
     if any(term in q for term in ("胸痛", "呼吸困难", "昏迷", "抽搐")):
         return "这些表现可能需要紧急处理，请立即拨打120或前往急诊，不要等待线上回复。"
+    if "食用真菌过敏" in q and any(term in q for term in ("痛经", "经期", "小腹")):
+        return ("已记录你对食用真菌过敏。经期疼痛不能只靠产品处理；如果疼痛反复、加重或伴随异常出血，"
+                "建议先做妇科评估。下方只列企业资料暂未标注蛹虫草的日常营养候选，仍需再次核对包装标签。")
     if any(term in q for term in ("怀孕", "孕期", "哺乳", "过敏", "降压药", "抗凝药", "怎么吃", "剂量")):
         return ("这种情况不适合在线直接安排产品或剂量。请先停止自行搭配，核对包装上的配料、过敏原和禁忌，"
                 "并把正在使用的药物或特殊情况告诉医生或药师后再决定。")
@@ -984,6 +987,31 @@ def _safe_text_fallback(query):
                 "还需要结合饮食、睡眠、排便、精力以及必要的专业检查。")
     return ("我先给你一个安全的处理顺序：明确目标，记录近期饮食、活动、睡眠和身体感受，"
             "再根据持续变化逐项调整。涉及明显不适、慢病、用药或特殊人群时，请先咨询医生或药师。")
+
+
+def _text_product_recommendation(query):
+    q = _compact_text(query)
+    if any(term in q for term in ("胸痛", "呼吸困难", "昏迷", "抽搐", "怀孕", "孕期", "哺乳",
+                                  "降压药", "抗凝药", "儿童")):
+        return ""
+    if "过敏" in q and "食用真菌过敏" not in q:
+        return ""
+    note, keys = "", []
+    if any(term in q for term in ("痛经", "经期", "小腹发凉")):
+        if "食用真菌过敏" in q:
+            note = ("**已排除：润美人®【經舒寶】**——资料含蛹虫草，与你提供的食用真菌过敏信息冲突，"
+                    "本次不推荐。\n\n")
+            keys = ["双花燕窝阿胶姜桂膏"]
+        else:
+            keys = ["經舒寶", "双花燕窝阿胶姜桂膏"]
+    elif any(term in q for term in ("便秘", "排便", "肠道")):
+        keys = ["果燃畅通", "颐纤芋芸益生菌"]
+    elif any(term in q for term in ("平台期", "运动", "体重管理")):
+        keys = ["左旋肉碱绿茶控能片"]
+    elif any(term in q for term in ("气血", "气色", "疲劳")):
+        keys = ["颜润堂PQQ"]
+    details = _product_details(keys[:2])
+    return ("**候选产品（不是治疗或食用建议）**\n" + note + _product_block(details)) if details else ""
 
 
 def _quick_reply(query):
@@ -1017,6 +1045,9 @@ def chat(query, user, conv):
         except Exception as e:
             print(f"[chat] direct_fallback={type(e).__name__}", flush=True)
             answer, mode = _safe_text_fallback(query), "fallback"
+        product_recommendation = _text_product_recommendation(query)
+        if product_recommendation:
+            answer += "\n\n" + product_recommendation
         _remember_text_turn(conv, query, answer)
         return {"answer": answer, "conversation_id": conv, "fast_path": False, "mode": mode}
     body = {"inputs": {}, "query": query, "response_mode": "blocking", "user": user or "h5user"}

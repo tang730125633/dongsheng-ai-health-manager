@@ -559,6 +559,17 @@ second = h.chat("我刚才问了什么？", "test", first["conversation_id"])
 assert second["answer"] == "第二轮回答"
 assert any(message.get("content") == "BMI 是什么？" for message in model_calls[1])
 
+allergy_product = h.chat("我对食用真菌过敏，经常痛经", "test", "")
+assert "已排除：润美人®【經舒寶】" in allergy_product["answer"]
+assert "蛹虫草" in allergy_product["answer"]
+assert "仙润堂®双花燕窝阿胶姜桂膏" in allergy_product["answer"]
+assert "搭配产品：润美人®【經舒寶】" not in allergy_product["answer"]
+assert "不是治疗或食用建议" in allergy_product["answer"]
+
+period_product = h.chat("我经常痛经", "test", "")
+assert "润美人®【經舒寶】" in period_product["answer"]
+assert "仙润堂®双花燕窝阿胶姜桂膏" in period_product["answer"]
+
 def failed_text_model(messages):
     raise TimeoutError("provider timeout")
 
@@ -566,4 +577,5 @@ h._text_model = failed_text_model
 fallback = h.chat("我怀孕了，产品怎么吃？", "test", first["conversation_id"])
 assert fallback["mode"] == "fallback" and "医生或药师" in fallback["answer"]
 assert "繁忙" not in fallback["answer"] and "HTTP" not in fallback["answer"]
+assert "候选产品" not in fallback["answer"]
 print("ok")

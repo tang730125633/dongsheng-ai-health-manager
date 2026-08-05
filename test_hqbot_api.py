@@ -73,6 +73,8 @@ for profile in h.BODY_MAP.values():
     assert len(h._product_details(profile["products"])) == len(profile["products"])
 assert not any(word in product["benefit"] for product in h.PRODUCT_CATALOG.values()
                for word in ("治疗", "燃脂翻倍", "控糖稳血糖", "改善睡眠"))
+assert not any(word in product["selling_point"] for product in h.PRODUCT_CATALOG.values()
+               for word in ("保证有效", "燃脂翻倍", "必然通便", "不反弹"))
 assert all(not h._has_gender_assumption(product["benefit"]) for product in h.PRODUCT_CATALOG.values())
 assert not {"氣恤寶", "双花燕窝阿胶姜桂膏", "經舒寶"} & set(h.AUTO_IMAGE_PRODUCT_KEYS)
 
@@ -564,11 +566,31 @@ assert "已排除：润美人®【經舒寶】" in allergy_product["answer"]
 assert "蛹虫草" in allergy_product["answer"]
 assert "仙润堂®双花燕窝阿胶姜桂膏" in allergy_product["answer"]
 assert "搭配产品：润美人®【經舒寶】" not in allergy_product["answer"]
-assert "不是治疗或食用建议" in allergy_product["answer"]
+assert "为什么适合你" in allergy_product["answer"]
+assert "购买方式" in allergy_product["answer"]
 
 period_product = h.chat("我经常痛经", "test", "")
 assert "润美人®【經舒寶】" in period_product["answer"]
 assert "仙润堂®双花燕窝阿胶姜桂膏" in period_product["answer"]
+
+problem_cases = {
+    "最近身体沉重，饮食也比较油腻": "仙润堂®五指毛桃茯苓营养膏",
+    "我总是便秘，排便不规律": "果燃畅通膳食纤维果肽饮",
+    "饭后肚子胀，消化不太好": "必颜堂·颐纤芋芸益生菌固体饮料",
+    "我经常不吃早餐，三餐不规律": "必颐堂·青稞匀浆膳",
+    "运动减重遇到平台期": "左旋肉碱绿茶控能片",
+    "最近气色不太好": "润美人®【氣恤寶】红石榴胶原三肽植物饮品",
+    "皮肤暗沉，想补充胶原": "颜润堂·PQQ前花青素胶原蛋白肽饮",
+}
+coverage_text = period_product["answer"]
+for problem, product_name in problem_cases.items():
+    recommendation = h._text_product_recommendation(problem)
+    coverage_text += recommendation
+    assert product_name in recommendation, (problem, recommendation)
+    assert "为什么适合你" in recommendation and "购买第1款" in recommendation
+assert all(product["name"] in coverage_text for product in h.PRODUCT_CATALOG.values())
+assert not h._text_product_recommendation("我有高血压，想减肥")
+assert not h._text_product_recommendation("我对一种配料过敏，想改善肠道")
 
 def failed_text_model(messages):
     raise TimeoutError("provider timeout")

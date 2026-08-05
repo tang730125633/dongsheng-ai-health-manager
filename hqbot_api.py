@@ -53,54 +53,63 @@ PRODUCT_CATALOG = {
         "aliases": ("五指毛桃茯苓膏",),
         "ingredients": ("五指毛桃", "茯苓", "薏仁", "山药", "赤小豆", "陈皮"),
         "benefit": "传统食养型营养膏，用于日常膳食调理与营养补充",
+        "selling_point": "适合把日常膳食调理、饮食偏油后的轻负担管理作为当前重点",
     },
     "果燃畅通": {
         "name": "果燃畅通膳食纤维果肽饮",
         "aliases": (),
         "ingredients": ("膳食纤维", "果肽", "益生元"),
         "benefit": "补充膳食纤维和益生元，支持日常肠道与排便管理",
+        "selling_point": "膳食纤维与益生元一起补充，适合把排便规律作为当前管理重点",
     },
     "颐纤芋芸益生菌": {
         "name": "必颜堂·颐纤芋芸益生菌固体饮料",
         "aliases": ("颐纤益生菌",),
         "ingredients": ("高活性益生菌", "芋头膳食纤维", "白芸豆提取物", "益生元复合配方"),
         "benefit": "补充益生菌与膳食纤维，支持日常肠道微生态和消化管理",
+        "selling_point": "同时补充益生菌、膳食纤维和益生元，适合关注消化感受与肠道微生态",
     },
     "青稞匀浆膳": {
         "name": "必颐堂·青稞匀浆膳",
         "aliases": (),
         "ingredients": ("高原青稞", "大豆/乳清/鸡蛋全蛋三重蛋白", "兰州百合", "复配维生素矿物质"),
         "benefit": "可作为膳食或代餐营养补充，提供蛋白质、膳食纤维及维生素矿物质",
+        "selling_point": "蛋白质、膳食纤维及维生素矿物质组合，适合早餐或三餐不规律时做营养补充",
     },
     "左旋肉碱绿茶控能片": {
         "name": "左旋肉碱绿茶控能片",
         "aliases": ("左旋肉碱",),
         "ingredients": ("左旋肉碱", "绿茶EGCG"),
         "benefit": "用于运动和体重管理期间的营养补充，需配合合理饮食与运动",
+        "selling_point": "更贴合有运动习惯、正在控制体重或遇到平台期的人群",
     },
     "氣恤寶": {
         "name": "润美人®【氣恤寶】红石榴胶原三肽植物饮品",
         "aliases": ("气恤宝",),
         "ingredients": ("红石榴胶原三肽", "黄芪", "当归", "大枣", "红参"),
         "benefit": "补充胶原相关成分及手册所列食养原料，用于日常营养与皮肤状态管理",
+        "selling_point": "兼顾胶原相关营养和传统食养原料，适合关注气色与皮肤状态的人群",
     },
     "颜润堂PQQ": {
         "name": "颜润堂·PQQ前花青素胶原蛋白肽饮",
         "aliases": ("PQQ胶原蛋白肽饮",),
         "ingredients": ("胶原蛋白肽10800mg", "胶原三肽155mg", "PQQ", "法国前花青素"),
         "benefit": "补充胶原蛋白肽、PQQ及前花青素，面向皮肤状态和抗氧化营养支持",
+        "selling_point": "胶原蛋白肽含量明确，并搭配PQQ和前花青素，适合关注皮肤状态与抗氧化营养的人群",
     },
     "双花燕窝阿胶姜桂膏": {
         "name": "仙润堂®双花燕窝阿胶姜桂膏",
         "aliases": ("阿胶姜桂膏",),
         "ingredients": ("双花燕窝", "阿胶", "姜桂", "玫瑰", "枸杞"),
         "benefit": "含燕窝、阿胶和姜桂等传统食养成分，用于日常食养与营养补充",
+        "selling_point": "燕窝、阿胶与姜桂等传统食养组合，适合关注经期前后日常食养的人群",
     },
     "經舒寶": {
         "name": "润美人®【經舒寶】黄芪白芷γ-氨基丁酸植物饮品",
         "aliases": ("经舒宝",),
         "ingredients": ("黄芪", "白芷", "GABA", "肉桂", "当归", "蛹虫草"),
         "benefit": "含黄芪、白芷、GABA、肉桂和当归等手册所列原料，用于日常营养补充",
+        "selling_point": "配方方向更贴近经期前后的日常营养关注，但不能替代痛经诊疗",
     },
 }
 AUTO_IMAGE_PRODUCT_KEYS = ("五指毛桃茯苓营养膏", "果燃畅通", "颐纤芋芸益生菌",
@@ -111,6 +120,7 @@ PRODUCT_NOTICE = ("主要成分与作用方向依据企业产品手册整理，�
 
 TEXT_SYSTEM = """你是独立小程序“AI健康管家”的健康与体重管理助手，不属于黄雀产品。
 用简洁、自然的中文回答。优先给低风险的饮食、活动、睡眠和记录建议；不要在正文自行列具体产品，后端会按风险规则追加候选产品。
+用户想了解或购买已推荐产品时，引导其联系产品顾问核对详情和购买方式；不得编造价格、优惠、库存、链接或治疗效果。
 你只能把下方产品资料当作企业手册中的成分与日常营养方向，不能声称治疗、保证有效、燃脂翻倍、必然通便或不反弹；
 不能自行给产品、药物或保健品的具体剂量。涉及孕哺、儿童、过敏、慢病或正在用药时，先建议核对包装并咨询医生或药师。
 舌照只能描述可见特征，不能单凭舌象诊断疾病或确认体质。胸痛、呼吸困难、昏迷或抽搐时应立即拨打120。
@@ -431,7 +441,8 @@ def _product_details(names):
         for key, product in PRODUCT_CATALOG.items():
             if wanted in (key, product["name"], *product["aliases"]) and key not in [x["key"] for x in found]:
                 found.append({"key": key, "name": product["name"],
-                              "ingredients": list(product["ingredients"]), "benefit": product["benefit"]})
+                              "ingredients": list(product["ingredients"]), "benefit": product["benefit"],
+                              "selling_point": product.get("selling_point", product["benefit"])})
                 break
     return found
 
@@ -992,7 +1003,8 @@ def _safe_text_fallback(query):
 def _text_product_recommendation(query):
     q = _compact_text(query)
     if any(term in q for term in ("胸痛", "呼吸困难", "昏迷", "抽搐", "怀孕", "孕期", "哺乳",
-                                  "降压药", "抗凝药", "儿童")):
+                                  "降压药", "抗凝药", "正在吃药", "服药", "用药", "儿童", "肾病",
+                                  "肝病", "糖尿病", "高血压", "心脏病")):
         return ""
     if "过敏" in q and "食用真菌过敏" not in q:
         return ""
@@ -1004,14 +1016,33 @@ def _text_product_recommendation(query):
             keys = ["双花燕窝阿胶姜桂膏"]
         else:
             keys = ["經舒寶", "双花燕窝阿胶姜桂膏"]
-    elif any(term in q for term in ("便秘", "排便", "肠道")):
+    elif any(term in q for term in ("便秘", "排便困难", "排便不规律", "膳食纤维")):
         keys = ["果燃畅通", "颐纤芋芸益生菌"]
-    elif any(term in q for term in ("平台期", "运动", "体重管理")):
-        keys = ["左旋肉碱绿茶控能片"]
-    elif any(term in q for term in ("气血", "气色", "疲劳")):
-        keys = ["颜润堂PQQ"]
+    elif any(term in q for term in ("肚子胀", "腹胀", "消化", "肠道", "菌群")):
+        keys = ["颐纤芋芸益生菌", "果燃畅通"]
+    elif any(term in q for term in ("平台期", "运动", "体重管理", "控制体重", "减重", "减肥")):
+        keys = ["左旋肉碱绿茶控能片", "青稞匀浆膳"]
+    elif any(term in q for term in ("早餐", "三餐不规律", "代餐", "蛋白质", "营养不均衡")):
+        keys = ["青稞匀浆膳"]
+    elif any(term in q for term in ("身体沉重", "湿气", "水肿", "饮食油腻")):
+        keys = ["五指毛桃茯苓营养膏", "果燃畅通"]
+    elif any(term in q for term in ("皮肤", "胶原", "抗氧化", "暗沉", "干燥", "松弛")):
+        keys = ["颜润堂PQQ", "氣恤寶"]
+    elif any(term in q for term in ("气血", "气色", "面色", "疲劳", "乏力")):
+        keys = ["氣恤寶", "颜润堂PQQ"]
     details = _product_details(keys[:2])
-    return ("**候选产品（不是治疗或食用建议）**\n" + note + _product_block(details)) if details else ""
+    if not details:
+        return ""
+    cards = "\n".join(
+        f"{i}. **{product['name']}**\n"
+        f"   - 为什么适合你：{product['selling_point']}。\n"
+        f"   - 产品优势：{product['benefit']}\n"
+        f"   - 主要成分：{'、'.join(product['ingredients'])}"
+        for i, product in enumerate(details, 1))
+    cta = ("如果这些方向正是你目前最想改善的，我建议优先了解第1款；确认包装配料与你的过敏、慢病和用药不冲突后，"
+           "可以回复“购买第1款”，继续联系产品顾问核对详情和购买方式。你也可以补充年龄、主要目标和正在用的药物，"
+           "我再帮你在两款中缩小选择。")
+    return "**根据你的问题，为你匹配的产品**\n" + note + cards + "\n\n" + PRODUCT_NOTICE + "\n\n" + cta
 
 
 def _quick_reply(query):

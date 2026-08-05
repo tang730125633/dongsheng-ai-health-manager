@@ -527,10 +527,20 @@ def fake_dify(body):
 h._dify = fake_dify
 fast = h.chat("hi", "test", "old")
 assert fast["fast_path"] and fast["conversation_id"] == "old" and not calls
+intro = h.chat("你好，请用一句话介绍你能提供哪些帮助。", "test", "old")
+assert intro["fast_path"] and intro["conversation_id"] == "old" and not calls
 assert h.chat("继续之前的问题", "test", "old") == {
     "answer": "ok", "conversation_id": "new", "fast_path": False}
 assert calls == [
     {"inputs": {}, "query": "继续之前的问题", "response_mode": "blocking", "user": "test", "conversation_id": "old"},
     {"inputs": {}, "query": "继续之前的问题", "response_mode": "blocking", "user": "test"},
 ]
+
+def timeout_dify(body):
+    raise urllib.error.HTTPError("http://dify", 504, "Gateway Time-out", {}, None)
+
+h._dify = timeout_dify
+timeout = h.chat("帮我分析一下", "test", "old")
+assert timeout == {"answer": "AI 健康管家暂时繁忙，请稍后重试。", "conversation_id": "old",
+                   "fast_path": False, "retryable": True}
 print("ok")

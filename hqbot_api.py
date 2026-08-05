@@ -912,7 +912,7 @@ def _quick_reply(query):
     q = _short(query, 80).strip().rstrip("。！？!? ").casefold()
     if q in ("你好", "您好", "在吗", "哈喽", "hello", "hi"):
         return "你好！我是东晟时代 AI 健康管家，可以帮你解读体测数据、分析舌象，以及回答体重管理问题。"
-    if q in ("你是谁", "你能做什么", "有什么功能"):
+    if q in ("你是谁", "你能做什么", "有什么功能") or "能提供哪些帮助" in q:
         return ("我是东晟时代 AI 健康管家。我能解读体测报告、观察舌象可见特征，"
                 "并根据你补充的情况给出日常管理建议。我不做疾病诊断，也不代替医生。")
     return ""
@@ -925,14 +925,19 @@ def chat(query, user, conv):
     body = {"inputs": {}, "query": query, "response_mode": "blocking", "user": user or "h5user"}
     if conv:
         body["conversation_id"] = conv
-    try:
-        d = _dify(body)
-    except urllib.error.HTTPError as e:
-        if not conv or e.code != 400:
+    for attempt in range(2):
+        try:
+            d = _dify(body)
+            break
+        except urllib.error.HTTPError as e:
+            if attempt == 0 and conv and e.code == 400:
+                # ponytail: old conversations pin the dead GLM config; start fresh instead of rewriting 190 DB rows.
+                body.pop("conversation_id")
+                continue
+            if e.code in (429, 500, 502, 503, 504):
+                return {"answer": "AI 健康管家暂时繁忙，请稍后重试。", "conversation_id": conv,
+                        "fast_path": False, "retryable": True}
             raise
-        # ponytail: old Dify conversations pin the dead GLM config; start fresh instead of rewriting 190 DB rows.
-        body.pop("conversation_id")
-        d = _dify(body)
     return {"answer": d.get("answer", ""), "conversation_id": d.get("conversation_id", ""),
             "fast_path": False}
 

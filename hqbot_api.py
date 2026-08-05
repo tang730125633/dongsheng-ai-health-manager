@@ -470,6 +470,15 @@ def _without_model_product_copy(text):
     return "\n".join(kept).strip()
 
 
+def _without_text_product_copy(text):
+    product_names = tuple(name for key, product in PRODUCT_CATALOG.items()
+                          for name in (key, product["name"], *product["aliases"]))
+    paragraphs = _short(text, 8000).split("\n\n")
+    return "\n\n".join(paragraph for paragraph in paragraphs
+                         if not any(name in paragraph for name in product_names)
+                         and "购买方式" not in paragraph).strip()
+
+
 def _product_block(details):
     if not details:
         return ""
@@ -1078,6 +1087,7 @@ def chat(query, user, conv):
             answer, mode = _safe_text_fallback(query), "fallback"
         product_recommendation = _text_product_recommendation(query)
         if product_recommendation:
+            answer = _without_text_product_copy(answer) or _safe_text_fallback(query)
             answer += "\n\n" + product_recommendation
         _remember_text_turn(conv, query, answer)
         return {"answer": answer, "conversation_id": conv, "fast_path": False, "mode": mode}

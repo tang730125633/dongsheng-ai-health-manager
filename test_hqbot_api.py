@@ -592,6 +592,13 @@ assert all(product["name"] in coverage_text for product in h.PRODUCT_CATALOG.val
 assert not h._text_product_recommendation("我有高血压，想减肥")
 assert not h._text_product_recommendation("我对一种配料过敏，想改善肠道")
 
+h._text_model = lambda messages: (
+    "可以先规律作息。\n\n推荐颜润堂·PQQ前花青素胶原蛋白肽饮帮助改善皮肤，联系顾问了解购买方式。")
+deduplicated_product = h.chat("皮肤暗沉，想补充胶原", "test", "")
+assert deduplicated_product["answer"].count("颜润堂·PQQ前花青素胶原蛋白肽饮") == 1
+assert "帮助改善皮肤" not in deduplicated_product["answer"]
+assert "可以先规律作息" in deduplicated_product["answer"]
+
 def failed_text_model(messages):
     raise TimeoutError("provider timeout")
 

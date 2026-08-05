@@ -641,6 +641,10 @@ assert "不必强迫自己固定" in schedule and "睡前约2–3小时" in sche
 bloating = h.chat("饭后容易胀气怎么办？", "test", "")["answer"]
 assert "增加过快反而可能加重产气" in bloating and "稀释胃酸" not in bloating
 assert "颐纤芋芸益生菌固体饮料" in bloating
+assert "单一舌象不能证明" in h.chat("什么样的舌头是健康的？", "test", "")["answer"]
+for noise in ("1", "111", "A AD"):
+    noisy = h.chat(noise, "test", "")
+    assert noisy["mode"] == "fast" and "信息不足" in noisy["answer"]
 
 h._text_model = lambda messages: (
     "可以先规律作息。\n\n含胶原蛋白肽的产品有助于提升皮肤弹性。\n\n"

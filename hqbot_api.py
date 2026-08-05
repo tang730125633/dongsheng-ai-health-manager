@@ -1180,6 +1180,19 @@ def _legacy_product_answer(query):
             "请提供包装正反面或正式产品资料，我再帮你核对；不要依据不明信息购买或食用。")
 
 
+def _simple_input_answer(query):
+    q = _short(query, 80).strip().rstrip("。！？!? ")
+    compact = _compact_text(q)
+    if compact in ("好的", "没有"):
+        return "好的。之后有具体的健康、体重、舌照或报告问题，随时告诉我。"
+    if re.fullmatch(r"\d{1,3}", compact) or re.fullmatch(r"[A-Za-z ]{1,8}", q):
+        return "这条内容信息不足，请直接告诉我你想了解的健康问题、产品名称，或上传舌照/体检报告。"
+    if "什么样的舌头是健康的" in compact:
+        return ("常见舌象通常是舌体淡红、湿润适中、舌苔薄而较均匀，但颜色会受光线、食物、饮水和口腔状态影响。"
+                "单一舌象不能证明健康或疾病；若持续疼痛、溃疡超过两周、肿胀或出现明显异常变化，应就医。")
+    return ""
+
+
 def _text_product_recommendation(query):
     q = _compact_text(query)
     if any(term in q for term in ("胸痛", "呼吸困难", "昏迷", "抽搐", "怀孕", "孕期", "哺乳",
@@ -1241,7 +1254,7 @@ def _quick_reply(query, has_history=False):
     return (_catalog_answer(query) or _controlled_product_answer(query)
             or _contextless_answer(query, has_history) or _high_risk_weight_answer(query)
             or _health_boundary_answer(query) or _upload_help_answer(query)
-            or _bmi_answer(query) or _legacy_product_answer(query))
+            or _bmi_answer(query) or _legacy_product_answer(query) or _simple_input_answer(query))
 
 
 def chat(query, user, conv):

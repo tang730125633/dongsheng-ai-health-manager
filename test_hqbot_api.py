@@ -11,6 +11,7 @@ os.environ.setdefault("OPENAI_BASE", "https://example.com/openai/v1")
 import hqbot_api as h
 
 assert h.OPENAI == "https://example.com/openai/v1/chat/completions"
+assert "不属于黄雀产品" in h.TEXT_SYSTEM
 assert "AI 健康管家" in h._quick_reply("你好！")
 assert "不代替医生" in h._quick_reply("你能做什么？")
 assert h._quick_reply("气血不足怎么办") == ""
@@ -525,12 +526,13 @@ def fake_dify(body):
     return {"answer": "ok", "conversation_id": "new"}
 
 h._dify = fake_dify
+h.CHAT_BACKEND = "dify"
 fast = h.chat("hi", "test", "old")
 assert fast["fast_path"] and fast["conversation_id"] == "old" and not calls
 intro = h.chat("你好，请用一句话介绍你能提供哪些帮助。", "test", "old")
 assert intro["fast_path"] and intro["conversation_id"] == "old" and not calls
 assert h.chat("继续之前的问题", "test", "old") == {
-    "answer": "ok", "conversation_id": "new", "fast_path": False}
+    "answer": "ok", "conversation_id": "new", "fast_path": False, "mode": "dify"}
 assert calls == [
     {"inputs": {}, "query": "继续之前的问题", "response_mode": "blocking", "user": "test", "conversation_id": "old"},
     {"inputs": {}, "query": "继续之前的问题", "response_mode": "blocking", "user": "test"},
@@ -541,6 +543,27 @@ def timeout_dify(body):
 
 h._dify = timeout_dify
 timeout = h.chat("帮我分析一下", "test", "old")
-assert timeout == {"answer": "AI 健康管家暂时繁忙，请稍后重试。", "conversation_id": "old",
-                   "fast_path": False, "retryable": True}
+assert timeout["mode"] == "fallback" and "繁忙" not in timeout["answer"]
+
+model_calls = []
+def fake_text_model(messages):
+    model_calls.append(messages)
+    return "第一轮回答" if len(model_calls) == 1 else "第二轮回答"
+
+h.CHAT_BACKEND = "direct"
+h._text_model = fake_text_model
+h._TEXT_CONVERSATIONS.clear()
+first = h.chat("BMI 是什么？", "test", "")
+assert first["mode"] == "direct" and first["conversation_id"]
+second = h.chat("我刚才问了什么？", "test", first["conversation_id"])
+assert second["answer"] == "第二轮回答"
+assert any(message.get("content") == "BMI 是什么？" for message in model_calls[1])
+
+def failed_text_model(messages):
+    raise TimeoutError("provider timeout")
+
+h._text_model = failed_text_model
+fallback = h.chat("我怀孕了，产品怎么吃？", "test", first["conversation_id"])
+assert fallback["mode"] == "fallback" and "医生或药师" in fallback["answer"]
+assert "繁忙" not in fallback["answer"] and "HTTP" not in fallback["answer"]
 print("ok")

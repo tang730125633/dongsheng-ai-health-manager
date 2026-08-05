@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""东晟时代统一后端服务。监听 :8093。视觉复用黄雀主站 OpenAI 配置，问答密钥读 /opt/dify.key。
+"""东晟时代统一后端服务。监听 :8093。文字与视觉默认直连 OpenAI 兼容出口。
 接口:
   POST /api/tongue   {"image":"<base64>","user":..(可选)} → 图片结果；有user时附一次性context_id
   POST /api/chat     {"query":..,"user":..,"conversation_id":..(可选),"context_id":..(可选)}
@@ -7,8 +7,11 @@
 """
 import base64, hashlib, json, os, secrets, threading, time, unicodedata, urllib.error, urllib.request, http.server, socketserver
 
-DIFY_KEY = os.environ.get("DIFY_KEY") or open("/opt/dify.key").read().strip()
+DIFY_KEY = os.environ.get("DIFY_KEY")
+if not DIFY_KEY and os.path.exists("/opt/dify.key"):
+    DIFY_KEY = open("/opt/dify.key").read().strip()
 DIFY = "http://127.0.0.1/v1/chat-messages"   # Dify 就在本机
+CHAT_BACKEND = os.environ.get("HEALTH_CHAT_BACKEND", "direct")
 TIP = ("仅依据当前舌照可见特征提供健康参考，不构成诊断、医疗建议或处方，不能替代医生评估；"
        "请勿据此开始、停用或调整药物、中成药或保健品。不适持续或加重请就医；"
        "胸痛、呼吸困难、昏迷或抽搐请立即拨打120。")
@@ -40,6 +43,7 @@ def _main_openai():
 
 OPENAI, OPENAI_KEY = _main_openai()
 OPENAI_MODEL = "gpt-4o"
+TEXT_MODEL = os.environ.get("HEALTH_TEXT_MODEL", "gpt-4o-mini")
 MAX_IMAGE_B64 = 16_000_000
 
 # ── 舌诊：模型只观察九项，后端判体质并查固定症状/产品 ──
@@ -104,6 +108,24 @@ AUTO_IMAGE_PRODUCT_KEYS = ("五指毛桃茯苓营养膏", "果燃畅通", "颐�
 PRODUCT_NOTICE = ("主要成分与作用方向依据企业产品手册整理，不代表疾病治疗功效；"
                   "实际配料、过敏原和食用要求以产品包装标签为准。完成过敏、慢病、用药和其他特殊情况核对前，"
                   "请勿仅凭本结果开始食用；相关人群食用前请先咨询医生或药师。")
+
+TEXT_SYSTEM = """你是独立小程序“AI健康管家”的健康与体重管理助手，不属于黄雀产品。
+用简洁、自然的中文回答。优先给低风险的饮食、活动、睡眠和记录建议，不主动推销产品。
+你只能把下方产品资料当作企业手册中的成分与日常营养方向，不能声称治疗、保证有效、燃脂翻倍、必然通便或不反弹；
+不能自行给产品、药物或保健品的具体剂量。涉及孕哺、儿童、过敏、慢病或正在用药时，先建议核对包装并咨询医生或药师。
+舌照只能描述可见特征，不能单凭舌象诊断疾病或确认体质。胸痛、呼吸困难、昏迷或抽搐时应立即拨打120。
+如果资料不足就明确说明，不编造产品、价格、成分或功效。
+受控产品资料：
+""" + "\n".join(
+    f"- {item['name']}：主要成分{', '.join(item['ingredients'])}；方向：{item['benefit']}"
+    for item in PRODUCT_CATALOG.values()
+)
+
+# ponytail: 仅保留进程内最近会话，独立账号和健康数据授权落地后再升级为加密持久存储。
+_TEXT_CONVERSATIONS = {}
+_TEXT_CONVERSATION_LOCK = threading.Lock()
+TEXT_CONVERSATION_TTL = 2 * 60 * 60
+TEXT_CONVERSATION_LIMIT = 1000
 
 BODY_MAP = {
     "痰湿蕴盛型": {"symptoms": ["身体沉重", "大便黏马桶", "困倦嗜睡", "面部出油", "痰多"],
@@ -903,9 +925,65 @@ def analyze_image(image_b64, user=""):
 
 
 def _dify(body):
+    if not DIFY_KEY:
+        raise RuntimeError("Dify rollback key is unavailable")
     req = urllib.request.Request(DIFY, data=json.dumps(body).encode(), headers={
         "Authorization": "Bearer " + DIFY_KEY, "Content-Type": "application/json"})
     return json.load(urllib.request.urlopen(req, timeout=120))
+
+
+def _text_model(messages):
+    body = json.dumps({"model": TEXT_MODEL, "messages": messages,
+                       "temperature": 0.2, "max_tokens": 500}).encode()
+    req = urllib.request.Request(OPENAI, data=body, headers={
+        "Authorization": "Bearer " + OPENAI_KEY, "Content-Type": "application/json"})
+    data = json.load(urllib.request.urlopen(req, timeout=18))
+    return _short(data["choices"][0]["message"].get("content"), 2400)
+
+
+def _conversation_history(conv):
+    now = time.time()
+    with _TEXT_CONVERSATION_LOCK:
+        expired = [key for key, value in _TEXT_CONVERSATIONS.items()
+                   if now - value["updated"] > TEXT_CONVERSATION_TTL]
+        for key in expired:
+            _TEXT_CONVERSATIONS.pop(key, None)
+        item = _TEXT_CONVERSATIONS.get(conv)
+        return list(item["messages"][-8:]) if item else []
+
+
+def _remember_text_turn(conv, query, answer):
+    now = time.time()
+    with _TEXT_CONVERSATION_LOCK:
+        if conv not in _TEXT_CONVERSATIONS and len(_TEXT_CONVERSATIONS) >= TEXT_CONVERSATION_LIMIT:
+            oldest = min(_TEXT_CONVERSATIONS, key=lambda key: _TEXT_CONVERSATIONS[key]["updated"])
+            _TEXT_CONVERSATIONS.pop(oldest, None)
+        item = _TEXT_CONVERSATIONS.setdefault(conv, {"updated": now, "messages": []})
+        item["updated"] = now
+        item["messages"] = (item["messages"] + [
+            {"role": "user", "content": _short(query, 1500)},
+            {"role": "assistant", "content": _short(answer, 2400)},
+        ])[-12:]
+
+
+def _safe_text_fallback(query):
+    q = _compact_text(query)
+    if any(term in q for term in ("胸痛", "呼吸困难", "昏迷", "抽搐")):
+        return "这些表现可能需要紧急处理，请立即拨打120或前往急诊，不要等待线上回复。"
+    if any(term in q for term in ("怀孕", "孕期", "哺乳", "过敏", "降压药", "抗凝药", "怎么吃", "剂量")):
+        return ("这种情况不适合在线直接安排产品或剂量。请先停止自行搭配，核对包装上的配料、过敏原和禁忌，"
+                "并把正在使用的药物或特殊情况告诉医生或药师后再决定。")
+    if "bmi" in q:
+        return ("BMI 是体重（千克）除以身高（米）的平方，用于体重状况的初步筛查。"
+                "它不能单独判断脂肪分布、肌肉量或疾病，也不替代专业评估。")
+    if "平台期" in q:
+        return ("先检查记录误差、饮食总量、日常活动、训练恢复、睡眠和压力是否变化。"
+                "连续记录一至两周再调整，避免突然极端节食或自行叠加产品。")
+    if "舌" in q:
+        return ("舌象只能描述舌色、舌体、舌苔和润燥等可见特征，不能凭单一照片确认体质或疾病。"
+                "还需要结合饮食、睡眠、排便、精力以及必要的专业检查。")
+    return ("我先给你一个安全的处理顺序：明确目标，记录近期饮食、活动、睡眠和身体感受，"
+            "再根据持续变化逐项调整。涉及明显不适、慢病、用药或特殊人群时，请先咨询医生或药师。")
 
 
 def _quick_reply(query):
@@ -919,9 +997,28 @@ def _quick_reply(query):
 
 
 def chat(query, user, conv):
+    query = _short(query, 1500)
+    conv = _short(conv, 120) or secrets.token_urlsafe(18)
+    if not query:
+        return {"answer": "请告诉我你想了解的健康或体重管理问题。", "conversation_id": conv,
+                "fast_path": True, "mode": "fast"}
     quick = _quick_reply(query)
     if quick:
-        return {"answer": quick, "conversation_id": conv, "fast_path": True}
+        _remember_text_turn(conv, query, quick)
+        return {"answer": quick, "conversation_id": conv, "fast_path": True, "mode": "fast"}
+    if CHAT_BACKEND != "dify":
+        messages = [{"role": "system", "content": TEXT_SYSTEM},
+                    *_conversation_history(conv), {"role": "user", "content": query}]
+        try:
+            answer = _text_model(messages)
+            if not answer:
+                raise ValueError("empty model answer")
+            mode = "direct"
+        except Exception as e:
+            print(f"[chat] direct_fallback={type(e).__name__}", flush=True)
+            answer, mode = _safe_text_fallback(query), "fallback"
+        _remember_text_turn(conv, query, answer)
+        return {"answer": answer, "conversation_id": conv, "fast_path": False, "mode": mode}
     body = {"inputs": {}, "query": query, "response_mode": "blocking", "user": user or "h5user"}
     if conv:
         body["conversation_id"] = conv
@@ -935,11 +1032,14 @@ def chat(query, user, conv):
                 body.pop("conversation_id")
                 continue
             if e.code in (429, 500, 502, 503, 504):
-                return {"answer": "AI 健康管家暂时繁忙，请稍后重试。", "conversation_id": conv,
-                        "fast_path": False, "retryable": True}
+                answer = _safe_text_fallback(query)
+                _remember_text_turn(conv, query, answer)
+                return {"answer": answer, "conversation_id": conv,
+                        "fast_path": False, "mode": "fallback"}
             raise
+    _remember_text_turn(conv, query, d.get("answer", ""))
     return {"answer": d.get("answer", ""), "conversation_id": d.get("conversation_id", ""),
-            "fast_path": False}
+            "fast_path": False, "mode": "dify"}
 
 
 class H(http.server.BaseHTTPRequestHandler):
@@ -996,7 +1096,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 else:
                     result = chat(data.get("query", ""), data.get("user", ""),
                                   data.get("conversation_id", ""))
-                mode = "context" if context_id else ("fast" if result.get("fast_path") else "dify")
+                mode = "context" if context_id else result.get("mode", "direct")
                 print(f"[chat] mode={mode} {_t.time()-t0:.1f}s", flush=True)
                 self._send({"ok": True, **result})
             else:

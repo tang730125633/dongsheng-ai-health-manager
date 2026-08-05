@@ -476,7 +476,7 @@ def _without_text_product_copy(text):
     paragraphs = _short(text, 8000).split("\n\n")
     return "\n\n".join(paragraph for paragraph in paragraphs
                          if not any(name in paragraph for name in product_names)
-                         and "购买方式" not in paragraph).strip()
+                         and "产品" not in paragraph and "购买方式" not in paragraph).strip()
 
 
 def _product_block(details):

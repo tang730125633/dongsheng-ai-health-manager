@@ -40,7 +40,8 @@ def _main_openai():
     url = base + ("/chat/completions" if base.endswith("/v1") else "/v1/chat/completions")
     official = (os.environ.get("OPENAI_OFFICIAL_BASE") or cfg.get("OPENAI_OFFICIAL_BASE")
                 or "https://api.openai.com/v1").rstrip("/") + "/chat/completions"
-    proxy = os.environ.get("HEALTH_EGRESS_PROXY") or os.environ.get("EGRESS_PROXY") or cfg.get("EGRESS_PROXY") or ""
+    proxy = (os.environ["HEALTH_EGRESS_PROXY"] if "HEALTH_EGRESS_PROXY" in os.environ
+             else os.environ.get("EGRESS_PROXY") or cfg.get("EGRESS_PROXY") or "")
     return url, key, official, proxy
 
 

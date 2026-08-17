@@ -9,6 +9,7 @@ from unittest.mock import patch
 os.environ.setdefault("DIFY_KEY", "test")
 os.environ.setdefault("OPENAI_API_KEY", "test")
 os.environ.setdefault("OPENAI_BASE", "https://example.com/openai/v1")
+os.environ.setdefault("HEALTH_EGRESS_PROXY", "")
 
 import hqbot_api as h
 

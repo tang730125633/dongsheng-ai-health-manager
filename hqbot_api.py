@@ -29,7 +29,7 @@ def _main_openai():
             for line in f:
                 if "=" in line and not line.lstrip().startswith("#"):
                     k, v = line.strip().split("=", 1)
-                    if k in ("OPENAI_BASE", "OPENAI_API_KEY"):
+                    if k in ("OPENAI_BASE", "OPENAI_API_KEY", "OPENAI_OFFICIAL_BASE", "EGRESS_PROXY"):
                         cfg[k] = v.strip().strip("\"'")
     except FileNotFoundError:
         pass
@@ -38,13 +38,26 @@ def _main_openai():
     if not key:
         raise RuntimeError("OPENAI_API_KEY 未配置")
     url = base + ("/chat/completions" if base.endswith("/v1") else "/v1/chat/completions")
-    return url, key
+    official = (os.environ.get("OPENAI_OFFICIAL_BASE") or cfg.get("OPENAI_OFFICIAL_BASE")
+                or "https://api.openai.com/v1").rstrip("/") + "/chat/completions"
+    proxy = os.environ.get("HEALTH_EGRESS_PROXY") or os.environ.get("EGRESS_PROXY") or cfg.get("EGRESS_PROXY") or ""
+    return url, key, official, proxy
 
 
-OPENAI, OPENAI_KEY = _main_openai()
+OPENAI, OPENAI_KEY, OPENAI_OFFICIAL, OPENAI_PROXY = _main_openai()
 OPENAI_MODEL = "gpt-4o"
 TEXT_MODEL = os.environ.get("HEALTH_TEXT_MODEL", "gpt-4o-mini")
 MAX_IMAGE_B64 = 16_000_000
+
+
+def _openai_json(body, timeout):
+    """Use the same working official-OpenAI egress as Huangque main site."""
+    endpoint = OPENAI_OFFICIAL if OPENAI_PROXY else OPENAI
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler(
+        {"http": OPENAI_PROXY, "https": OPENAI_PROXY} if OPENAI_PROXY else {}))
+    req = urllib.request.Request(endpoint, data=body, headers={
+        "Authorization": "Bearer " + OPENAI_KEY, "Content-Type": "application/json"})
+    return json.load(opener.open(req, timeout=timeout))
 
 # ── 舌诊：模型只观察九项，后端判体质并查固定症状/产品 ──
 PRODUCT_CATALOG = {
@@ -197,9 +210,7 @@ def _vision(system, image_b64, max_tokens=400):
         {"role": "system", "content": system}, {"role": "user", "content": content}],
         "temperature": 0.1, "max_tokens": max_tokens,
         "response_format": {"type": "json_object"}}).encode()
-    req = urllib.request.Request(OPENAI, data=body, headers={
-        "Authorization": "Bearer " + OPENAI_KEY, "Content-Type": "application/json"})
-    txt = (json.load(urllib.request.urlopen(req, timeout=120))["choices"][0]["message"].get("content") or "").strip()
+    txt = (_openai_json(body, timeout=60)["choices"][0]["message"].get("content") or "").strip()
     if txt.startswith("```"):
         txt = txt.split("```")[1].lstrip("json").strip()
     result = json.loads(txt)
@@ -821,12 +832,7 @@ def _non_direct_image_tip(source, summary=""):
 
 def analyze_image(image_b64, user=""):
     """一次视觉调用完成分类：舌照→体质查表；报告→Dify解读推荐；其他→引导语。"""
-    try:
-        r = _vision(UNIFIED_SYS, image_b64, max_tokens=1200)
-    except Exception as e:
-        print(f"[retry] vision失败重试一次: {e}", flush=True)
-        import time as _t; _t.sleep(1)
-        r = _vision(UNIFIED_SYS, image_b64, max_tokens=1200)
+    r = _vision(UNIFIED_SYS, image_b64, max_tokens=1200)
     t = _short(r.get("type"), 40).casefold().replace("-", "_") or "other"
     source = _short(r.get("image_source"), 40).casefold().replace("-", "_")
     if source not in ("direct_tongue_photo", "report", "screenshot", "poster", "other"):
@@ -959,9 +965,7 @@ def _dify(body):
 def _text_model(messages):
     body = json.dumps({"model": TEXT_MODEL, "messages": messages,
                        "temperature": 0.2, "max_tokens": 500}).encode()
-    req = urllib.request.Request(OPENAI, data=body, headers={
-        "Authorization": "Bearer " + OPENAI_KEY, "Content-Type": "application/json"})
-    data = json.load(urllib.request.urlopen(req, timeout=18))
+    data = _openai_json(body, timeout=18)
     return _short(data["choices"][0]["message"].get("content"), 2400)
 
 

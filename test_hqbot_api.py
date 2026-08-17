@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import base64
+import io
 import json
 import os
 import urllib.error
+from unittest.mock import patch
 
 os.environ.setdefault("DIFY_KEY", "test")
 os.environ.setdefault("OPENAI_API_KEY", "test")
@@ -11,6 +13,26 @@ os.environ.setdefault("OPENAI_BASE", "https://example.com/openai/v1")
 import hqbot_api as h
 
 assert h.OPENAI == "https://example.com/openai/v1/chat/completions"
+assert h.OPENAI_OFFICIAL == "https://api.openai.com/v1/chat/completions"
+assert h.OPENAI_PROXY == ""
+
+captured = {}
+class _FakeOpenAI:
+    def open(self, req, timeout):
+        captured.update(url=req.full_url, timeout=timeout)
+        return io.StringIO('{"ok": true}')
+
+old_proxy = h.OPENAI_PROXY
+h.OPENAI_PROXY = "http://127.0.0.1:10810"
+with patch.object(h.urllib.request, "ProxyHandler", side_effect=lambda value: captured.setdefault("proxy", value)), \
+     patch.object(h.urllib.request, "build_opener", return_value=_FakeOpenAI()):
+    assert h._openai_json(b"{}", 7) == {"ok": True}
+h.OPENAI_PROXY = old_proxy
+assert captured == {
+    "proxy": {"http": "http://127.0.0.1:10810", "https": "http://127.0.0.1:10810"},
+    "url": "https://api.openai.com/v1/chat/completions",
+    "timeout": 7,
+}
 assert "不属于黄雀产品" in h.TEXT_SYSTEM
 assert "AI 健康管家" in h._quick_reply("你好！")
 assert "不代替医生" in h._quick_reply("你能做什么？")

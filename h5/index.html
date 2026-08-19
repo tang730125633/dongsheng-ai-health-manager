@@ -12,6 +12,8 @@
   .bg{position:absolute;inset:0;background:url('./page-background.png') center/cover no-repeat;z-index:0}
   .statusbar{position:relative;height:calc(12px + env(safe-area-inset-top));z-index:4;flex:none}
   .new-chat{position:absolute;right:20px;top:calc(14px + env(safe-area-inset-top));z-index:6;border:0;border-radius:16px;padding:7px 12px;background:rgba(255,255,255,.9);color:var(--deep);font-size:13px}
+  .memory-toggle{position:absolute;left:20px;top:calc(14px + env(safe-area-inset-top));z-index:6;border:1px solid rgba(255,255,255,.65);border-radius:16px;padding:7px 12px;background:rgba(8,45,115,.72);color:#fff;font-size:13px}
+  .memory-toggle[aria-checked="true"]{background:#fff;color:var(--deep);border-color:#fff}
   .scroll{position:relative;flex:1;overflow-y:auto;z-index:2;display:flex;flex-direction:column;padding:0 20px 10px}
   .scroll::-webkit-scrollbar{display:none}
   .hero{position:relative;flex:none;min-height:400px}
@@ -30,6 +32,7 @@
   @keyframes bl{0%,60%,100%{opacity:.3}30%{opacity:1}}
   .panel{position:relative;z-index:5;flex:none;background:#fff;border-radius:28px 28px 0 0;
     padding:16px 20px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(8,45,115,.12)}
+  .memory-hint{margin:0 6px 10px;color:#687083;font-size:12px;line-height:1.4}
   .inputbar{display:flex;align-items:center;gap:12px;background:var(--input-bg);border-radius:34px;padding:9px 12px 9px 9px}
   .ai-btn{width:54px;height:54px;border-radius:50%;background:#fff;flex:none;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(65,73,201,.14)}
   .ai-btn img{width:32px;height:32px}
@@ -41,6 +44,7 @@
 <div class="phone">
   <div class="bg"></div>
   <div class="statusbar"></div>
+  <button class="memory-toggle" id="memoryToggle" type="button" role="switch" aria-checked="false">7天记忆：关</button>
   <button class="new-chat" id="newChat" type="button">新对话</button>
   <div class="scroll" id="scroll">
     <div class="hero" id="hero">
@@ -53,181 +57,15 @@
     <div class="msgs" id="msgs"></div>
   </div>
   <div class="panel">
+    <div class="memory-hint" id="memoryHint">最近对话不会在本机保留 7 天</div>
     <div class="inputbar">
       <div class="ai-btn"><img src="./icons/ai-assistant.svg" alt="AI"></div>
-      <input id="q" placeholder="你有什么想知道的,请输入" enterkeyhint="send">
+      <input id="q" maxlength="1500" placeholder="你有什么想知道的,请输入" enterkeyhint="send">
       <img class="add" id="tongue" src="./icons/add.svg" alt="上传舌诊">
       <input type="file" id="file" accept="image/*" style="display:none">
     </div>
   </div>
 </div>
 
-<script>
-const CHAT_API = "https://chat.huangquechuanmei.com/hqapi/api/chat";
-const TONGUE_API = "https://chat.huangquechuanmei.com/hqapi/api/tongue";
-const msgs = document.getElementById('msgs');
-const scroll = document.getElementById('scroll');
-const q = document.getElementById('q');
-const fileInput = document.getElementById('file');
-const SESSION_KEY = 'hq-health-session-v1';
-function loadSession(){
-  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || '{}'); }
-  catch (e) { return {}; }
-}
-const session = loadSession();
-const userId = session.userId || ('h5-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12));
-let convId = session.convId || "";
-let pendingContextId = "";
-let busy = false;
-
-function saveSession(){
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify({userId:userId, convId:convId})); }
-  catch (e) {}
-}
-saveSession();
-
-function mdToHtml(value){
-  let text = String(value == null ? '' : value);
-  text = text.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-  text = text.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-  text = text.replace(/^#{1,6}\s*(.+)$/gm, '<b>$1</b>');
-  text = text.replace(/^\s*[-—]{3,}\s*$/gm, '<hr style="border:none;border-top:1px solid #eef;margin:8px 0">');
-  return text;
-}
-
-function bottom(){ scroll.scrollTop = scroll.scrollHeight; }
-
-function addUser(text){
-  const bubble = document.createElement('div');
-  bubble.className = 'msg user';
-  bubble.textContent = text;
-  msgs.appendChild(bubble);
-  bottom();
-}
-
-function addAI(){
-  const row = document.createElement('div');
-  row.className = 'ai-row';
-  row.innerHTML = `<img class="avatar" src="./ai-avatar.png"><div class="msg ai"><span class="dots"><span></span><span></span><span></span></span></div>`;
-  msgs.appendChild(row);
-  bottom();
-  return row.querySelector('.msg.ai');
-}
-
-async function responseJson(response){
-  try { return await response.json(); }
-  catch (e) { return {}; }
-}
-
-async function send(){
-  const text = q.value.trim();
-  if(!text || busy) return;
-  busy = true;
-  q.value = "";
-  addUser(text);
-  const aiBubble = addAI();
-  try{
-    const response = await fetch(CHAT_API, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        query:text,
-        user:userId,
-        conversation_id:convId,
-        context_id:pendingContextId
-      })
-    });
-    const data = await responseJson(response);
-    if(response.status === 410){
-      pendingContextId = "";
-      aiBubble.textContent = '上一张图片的临时记忆已失效，请重新上传图片后再提问';
-    }else if(response.status === 409){
-      aiBubble.textContent = '上一张图片正在处理中，请稍后重试';
-    }else if(!response.ok || data.ok === false){
-      aiBubble.textContent = data.error || '服务暂时不可用，请稍后重试';
-    }else{
-      aiBubble.innerHTML = mdToHtml(data.answer || '（无回复）');
-      if(data.context_consumed) pendingContextId = "";
-      convId = data.reset_conversation ? "" : (data.conversation_id || convId);
-      saveSession();
-    }
-  }catch(e){
-    aiBubble.textContent = '网络出错了，请重试';
-  }
-  busy = false;
-  bottom();
-}
-
-function readDataUrl(file){
-  return new Promise((resolve, reject)=>{
-    const reader = new FileReader();
-    reader.onload = ()=>resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImage(src){
-  return new Promise((resolve, reject)=>{
-    const image = new Image();
-    image.onload = ()=>resolve(image);
-    image.onerror = reject;
-    image.src = src;
-  });
-}
-
-async function imageBase64(file){
-  const src = await readDataUrl(file);
-  const image = await loadImage(src);
-  const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-  canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.88).split(',')[1];
-}
-
-q.addEventListener('keydown', event=>{ if(event.key === 'Enter') send(); });
-document.getElementById('newChat').addEventListener('click', ()=>{
-  if(busy) return;
-  convId = "";
-  pendingContextId = "";
-  msgs.textContent = "";
-  saveSession();
-  q.focus();
-});
-document.getElementById('tongue').addEventListener('click', ()=>fileInput.click());
-fileInput.addEventListener('change', async ()=>{
-  const file = fileInput.files[0];
-  if(!file || busy) return;
-  busy = true;
-  pendingContextId = "";
-  const userBubble = document.createElement('div');
-  userBubble.className = 'msg user';
-  userBubble.innerHTML = `<img src="${URL.createObjectURL(file)}" style="width:150px;border-radius:8px;display:block">`;
-  msgs.appendChild(userBubble);
-  bottom();
-  const aiBubble = addAI();
-  try{
-    const image = await imageBase64(file);
-    const response = await fetch(TONGUE_API, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({image:image, user:userId})
-    });
-    const data = await responseJson(response);
-    if(!response.ok || data.ok === false){
-      aiBubble.textContent = data.error || '识别服务暂时不可用，请稍后重试';
-    }else{
-      aiBubble.innerHTML = mdToHtml(data.answer || data.tip || '图片已收到，但没有识别出清晰内容');
-      pendingContextId = data.context_id || "";
-    }
-  }catch(e){
-    aiBubble.textContent = '网络出错了，请重试';
-  }
-  busy = false;
-  bottom();
-  fileInput.value = "";
-});
-</script>
+<script src="./app.js" defer></script>
 </body></html>

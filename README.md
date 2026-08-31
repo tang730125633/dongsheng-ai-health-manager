@@ -1,7 +1,7 @@
 # 东晟 AI 健康管家
 
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="东晟 AI 健康管家：将文字问题、图片可见信息和受控资料匹配置于明确安全护栏内的日常健康信息服务">
+  <img src="./assets/readme/hero-zel-v1.webp" width="100%" alt="Zel and the orange cat inspecting neutral evidence through a safety gate before offering general guidance">
 </p>
 
 ## 价值
